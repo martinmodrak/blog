@@ -1,0 +1,89 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+- Repeat original numbers
+- rstan install
+- prior best practices
+- explain non-centered parametrization
+- mention rstanarm, brms
+
+```{r setup}
+library(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+library(INLA)
+```
+
+```{r}
+model_code = "
+  data {
+    int N;
+    vector[N] x;
+    int y[N];
+  }
+
+  parameters {
+    real alpha;
+    real beta;
+    vector[N] nu_normalized;
+    real<lower=0> tau_nu;
+  }
+
+  transformed parameters {
+    real nu_sigma = sqrt(1 / tau_nu);
+    vector[N] nu = nu_normalized * nu_sigma;
+  }
+
+  model {
+    //Stan parametrizes normal with sd not precision
+    real prior_sigma = sqrt(1 / 0.0001);
+
+    //taking advantage of Stan's implicit vectorization here
+    nu_normalized ~ normal(0,1);
+    y ~ poisson(exp(alpha + beta*x + nu));
+
+    alpha  ~ normal(0, prior_sigma);
+    beta  ~ normal(0, prior_sigma); 
+    tau_nu ~ gamma(0.01,0.01);
+  }
+
+/*  generated quantities {
+    vector[N] mu = exp(log_mu);
+  }*/
+"
+
+model <- stan_model(model_code = model_code)
+
+```
+
+```{r}
+N = 100000 #100 # 500, 5000, 25000, 100000 
+x = rnorm(N, mean=5,sd=1) 
+nu = rnorm(N,0,0.1)
+mu = exp(1 + 0.5*x + nu) 
+y = rpois(N,mu) 
+
+
+data <- list(
+  N = N,
+  x = x,
+  y = y
+)
+
+fit <- sampling(model, data = data, control = list(adapt_delta = 0.95));
+summary(fit, pars = c("alpha","beta","tau_nu"))$summary
+all_times <- get_elapsed_time(fit)
+max_total_time <- max(all_times[,"warmup"] + all_times[,"sample"])
+cat("\nTotal time for the longest chain: ", max_total_time, " seconds.\n")
+```
+
+```{r}
+nu = 1:N 
+fit_inla <- inla(y ~ x + f(nu,model="iid"), family = c("poisson"), 
+           data = data, control.predictor=list(link=1)) 
+fit_inla$summary.fixed
+fit_inla$summary.hyperpar
+```
+
