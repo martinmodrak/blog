@@ -117,7 +117,8 @@ test_N = function(N) {
   )
   
   data_stan = data
-  data_stan$alpha_prior_mena = 0
+  data_stan$alpha_prior_mean = 0
+  data_stan$beta_prior_mean = 0
   data_stan$alpha_beta_prior_precision = 0.001
   data_stan$tau_nu_prior_shape = 0.01
   data_stan$tau_nu_prior_rate = 0.01
