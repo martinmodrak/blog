@@ -466,7 +466,7 @@ if(run_inla) {
 </div>
 <div id="summary-of-the-timing" class="section level3">
 <h3>Summary of the timing</h3>
-<p>You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000.</p>
+<p>You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000. It may mean that Kathryn’s JAGS time is also too short.</p>
 <pre class="r"><code>my_results = merge.data.frame(inla_times, stan_times, by = &quot;N&quot;)
 kable(merge.data.frame(my_results, kathryn_results, by = &quot;N&quot;))</code></pre>
 <table>

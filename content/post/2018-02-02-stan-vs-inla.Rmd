@@ -254,7 +254,7 @@ for(N_to_show in N_values) {
 
 ###Summary of the timing
 
-You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000.
+You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000. It may mean that Kathryn's JAGS time is also too short.
 ```{r results='asis'}
 my_results = merge.data.frame(inla_times, stan_times, by = "N")
 kable(merge.data.frame(my_results, kathryn_results, by = "N"))
