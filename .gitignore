@@ -33,5 +33,7 @@ vignettes/*.pdf
 *.knit.md
 *.nb.html
 
+blogdown/
 public/
 themes/
+.Rproj.user

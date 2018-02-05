@@ -1,5 +1,5 @@
 ---
-title: "A simple Stan vs. INLA comparison"
+title: "A gentle Stan vs. INLA comparison"
 date: 2018-02-02
 output: html_notebook
 tags: ["R","Stan","INLA"]
@@ -7,29 +7,66 @@ tags: ["R","Stan","INLA"]
 
 Not long ago, I came across a nice blogpost by Kahtryn Morrison called [A gentle INLA tutorial](https://www.precision-analytics.ca/blog-1/inla). The blog was nice and helped me better appreciate INLA. But as a fan of the Stan probabilistic language, I felt that comparing INLA to JAGS is not really that relevant, as Stan should - at least in theory - be way faster and better than JAGS. Here, I ran a comparison of INLA to Stan on the second example called "Poisson GLM with an iid random effect".
 
-**The TLDR is:** For the model, Stan scales considerably better than JAGS, but still cannot scale to very large model. Also, for this model Stan and INLA give almost the same results. It seems that Stan becomes useful only when your model cannot be coded in INLA.
+**The TLDR is:** For this model, Stan scales considerably better than JAGS, but still cannot scale to very large model. Also, for this model Stan and INLA give almost the same results. It seems that Stan becomes useful only when your model cannot be coded in INLA.
 
-Pleas let me know (via an [issue on GitHub](https://github.com/martinmodrak/stan_vs_inla/issues)) should you find any error or anything else that should be included in this post. Also, if you run the experiment on a different machine and/or with different seed, let me know the results.
+Pleas let me know (via an [issue on GitHub](https://github.com/martinmodrak/blog/issues)) should you find any error or anything else that should be included in this post. Also, if you run the experiment on a different machine and/or with different seed, let me know the results.
 
 Here are the original numbers from Kathryn's blog:
 
-```{r echo=FALSE}
-kathryn_results <- data.frame(N = c(100, 500, 5000, 25000, 100000), rjags = c("30.394","142.532","1714.468","8610.32","got bored after 6 hours"), rinla = c(0.383,1.243,5.768,30.077,166.819))
-kathryn_results
+```{r echo=FALSE,results='asis'}
+library(knitr)
+kathryn_results = data.frame(N = c(100, 500, 5000, 25000, 100000), kathryn_rjags = c("30.394","142.532","1714.468","8610.32","got bored after 6 hours"), kathryn_rinla = c(0.383,1.243,5.768,30.077,166.819))
+kable(kathryn_results)
 ```
 
 *Note on running the code: Installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed. The whole notebook runs for a few hours.*
 
 ##The comparison
 
-
-```{r setup}
+Let's setup our libraries.
+```{r setup,message=FALSE,warning=FALSE}
 library(rstan)
+library(brms)
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
 library(INLA)
+library(tidyverse)
 set.seed(6619414)
 ```
+
+The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a rerun.
+```{r}
+cache_dir = "_stan_vs_inla_cache/"
+if(!dir.exists(cache_dir)){
+  dir.create(cache_dir)
+}
+```
+
+
+
+Let's start by simulating data
+
+```{r}
+#The sizes of datasets to work with
+N_values = c(100, 500, 5000, 25000)
+data = list()
+for(N in N_values) {
+  x = rnorm(N, mean=5,sd=1) 
+  nu = rnorm(N,0,0.1)
+  mu = exp(1 + 0.5*x + nu) 
+  y = rpois(N,mu) 
+  
+  
+  data[[N]] = list(
+    N = N,
+    x = x,
+    y = y
+  )  
+}
+```
+
+
+### Measuring Stan
 
 Here is the model code in Stan (it is good practice to put it into a file, but I wanted to make this post self-contained). It is almost 1-1 rewrite of the original JAGS code, with few important changes:
 
@@ -41,7 +78,7 @@ There are also packages to let you specify common models (including this one) wi
 
 Note also that Stan developers would suggest against Gamma(0.01,0.01) prior on precision in favor of normal or Cauchy distribution on sd, see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations.
 
-```{r model}
+```{r model, cache=TRUE, messages=FALSE,warning=FALSE,results='hide'}
 model_code = "
   data {
     int N;
@@ -75,7 +112,7 @@ model_code = "
 
     //taking advantage of Stan's implicit vectorization here
     nu_normalized ~ normal(0,1);
-    y ~ poisson(exp(alpha + beta*x + nu));
+    y ~ poisson_log(alpha + beta*x + nu); //The built-in poisson_log(x) === poisson(exp(x))
 
     alpha  ~ normal(alpha_prior_mean, alpha_beta_prior_sigma);
     beta  ~ normal(beta_prior_mean, alpha_beta_prior_sigma); 
@@ -95,68 +132,111 @@ model = stan_model(model_code = model_code)
 
 ```
 
-Below is the code to make the time measurements. Some caveats:
+Below is the code to make the actual measurements. Some caveats:
+
 * The compilation of the Stan model is not counted (you can avoid it with rstanarm and need to do it only once otherwise)
 * There is some overhead in transferring the posterior samples from Stan to R. This overhead is non-negligible for the larger models, but you can get rid of it by storing the samples in a file and reading them separately. The overhead is not measured here.
 * Stan took > 16 hours to converge for the larges data size (1e5) and then I had issues fitting the posterior samples into memory on my computer. Notably, R-Inla also crashed on my computer for this size. The largest size is thus excluded here, but I have to conclude that if you get bored after 6 hours, Stan is not practical for such a big model.
 * I was not able to get rjags running in a reasonable amount of time, so I did not rerun the JAGS version of the model.
 
-```{r performance, cache=TRUE}
-test_N = function(N) {
-  cat("\n====== N = ", N, " =======\n\n")
-  x = rnorm(N, mean=5,sd=1) 
-  nu = rnorm(N,0,0.1)
-  mu = exp(1 + 0.5*x + nu) 
-  y = rpois(N,mu) 
-  
-  
-  data = list(
-    N = N,
-    x = x,
-    y = y
-  )
-  
-  data_stan = data
-  data_stan$alpha_prior_mean = 0
-  data_stan$beta_prior_mean = 0
-  data_stan$alpha_beta_prior_precision = 0.001
-  data_stan$tau_nu_prior_shape = 0.01
-  data_stan$tau_nu_prior_rate = 0.01
-  
-  
-  fit = sampling(model, data = data); 
-  print(summary(fit, pars = c("alpha","beta","tau_nu"))$summary)
-  all_times = get_elapsed_time(fit)
-  max_total_time_stan = max(all_times[,"warmup"] + all_times[,"sample"])
-  cat("\nStan: Total time for the longest chain: ", max_total_time_stan, " seconds.\n")
+```{r}
+stan_times_file = paste0(cache_dir, "stan_times.csv")
+stan_summary_file = paste0(cache_dir, "stan_summary.csv")
+run_stan = TRUE
+if(file.exists(stan_times_file) && file.exists(stan_summary_file)) {
+  stan_times = read.csv(stan_times_file)
+  stan_summary = read.csv(stan_summary_file) 
+  if(setequal(stan_times$N, N_values) && setequal(stan_summary$N, N_values)) {
+    run_stan = FALSE
+  }
+} 
+
+if(run_stan) {
+  stan_times_values = numeric(length(N_values))
+  stan_summary_list = list()
+  step = 1
+  for(N in N_values) {
+    data_stan = data[[N]]
+    data_stan$alpha_prior_mean = 0
+    data_stan$beta_prior_mean = 0
+    data_stan$alpha_beta_prior_precision = 0.001
+    data_stan$tau_nu_prior_shape = 0.01
+    data_stan$tau_nu_prior_rate = 0.01
     
-  nu = 1:N 
-  fit_inla = inla(y ~ x + f(nu,model="iid"), family = c("poisson"), 
-             data = data, control.predictor=list(link=1)) 
+    
+    fit = sampling(model, data = data_stan);
+    stan_summary_list[[step]] = as.data.frame(rstan::summary(fit, pars = c("alpha","beta","tau_nu"))$summary) %>% rownames_to_column("parameter")
+    stan_summary_list[[step]]$N = N
+    
+    all_times = get_elapsed_time(fit)
+    stan_times_values[step] = max(all_times[,"warmup"] + all_times[,"sample"])
+    
+    step = step + 1
+  }
+  stan_times = data.frame(N = N_values, stan_time = stan_times_values)
+  stan_summary = do.call(rbind, stan_summary_list)
   
-  time_inla = fit_inla$cpu.used["Total"]
-  cat("INLA: total cpu used: ", time_inla, "\n")
-  print(fit_inla$summary.fixed)
-  print(fit_inla$summary.hyperpar)  
-  
-  return(data.frame(N = N, rstan = max_total_time_stan, rinla = time_inla))
-}
-
-results = list()
-step = 1
-
-for(N in c(100, 500, 5000, 25000)) {
-  results[[step]] = test_N(N)
-  step = step + 1
+  write.csv(stan_times, stan_times_file,row.names = FALSE)
+  write.csv(stan_summary, stan_summary_file,row.names = FALSE)
 }
 ```
 
+
+### Measuring INLA
+
+```{r}
+inla_times_file = paste0(cache_dir,"inla_times.csv")
+inla_summary_file = paste0(cache_dir,"inla_summary.csv")
+run_inla = TRUE
+if(file.exists(inla_times_file) && file.exists(inla_summary_file)) {
+  inla_times = read.csv(inla_times_file)
+  inla_summary = read.csv(inla_summary_file) 
+  if(setequal(inla_times$N, N_values) && setequal(inla_summary$N, N_values)) {
+    run_inla = FALSE
+  }
+} 
+
+if(run_inla) {
+  inla_times_values = numeric(length(N_values))
+  inla_summary_list = list()
+  step = 1
+  for(N in N_values) {
+    nu = 1:N 
+    fit_inla = inla(y ~ x + f(nu,model="iid"), family = c("poisson"), 
+               data = data[[N]], control.predictor=list(link=1)) 
+    
+    inla_times_values[step] = fit_inla$cpu.used["Total"]
+    inla_summary_list[[step]] = rbind(fit_inla$summary.fixed %>% select(-kld),fit_inla$summary.hyperpar) %>%  rownames_to_column("parameter")
+    inla_summary_list[[step]]$N = N
+    
+    step = step + 1
+  }
+  inla_times = data.frame(N = N_values, inla_time = inla_times_values)
+  inla_summary = do.call(rbind, inla_summary_list)
+  
+  write.csv(inla_times, inla_times_file,row.names = FALSE)
+  write.csv(inla_summary, inla_summary_file,row.names = FALSE)
+}
+```
+
+
+###Checking inferences
+Here we see side-by-side comparisons of the inferences and they seem pretty comparable between Stan and Inla:
+
+```{r results='asis'}
+for(N_to_show in N_values) {
+  print(kable(stan_summary %>% filter(N == N_to_show) %>% select(c("parameter","mean","sd")), caption = paste0("Stan results for N = ", N_to_show)))
+  print(kable(inla_summary %>% filter(N == N_to_show) %>% select(c("parameter","mean","sd")), caption = paste0("INLA results for N = ", N_to_show)))
+}
+```
+
+
 ###Summary of the timing
 
-You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster.
-```{r}
-my_results = do.call(rbind, results)
-merge.data.frame(my_results, kathryn_results, by = "N")
+You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000.
+```{r results='asis'}
+my_results = merge.data.frame(inla_times, stan_times, by = "N")
+kable(merge.data.frame(my_results, kathryn_results, by = "N"))
 ```
 
 You could obviously do multiple runs to reduce uncertainty etc., but this post has already taken too much time of mine, so this will be left to others.
@@ -248,7 +328,7 @@ test_precision = function(N) {
   all_times = get_elapsed_time(fit)
   max_total_time_stan = max(all_times[,"warmup"] + all_times[,"sample"])
 
-  samples = extract(fit, pars = c("alpha","beta","tau_nu"))
+  samples = rstan::extract(fit, pars = c("alpha","beta","tau_nu"))
   alpha_mean_diff_stan = mean(samples$alpha) - alpha
   beta_mean_diff_stan = mean(samples$beta) - beta
   tau_nu_mean_diff_stan = mean(samples$tau_nu) - tau_nu
@@ -276,16 +356,22 @@ test_precision = function(N) {
 ```
 
 
-Actually running the comparison. On some occasions, Stan does not converge, my best guess is that the data are somehow pathological, but I didn't investigate thoroughly. You see that results for Stan and Inla are very similar both as point estimates and the distribution of posterior quantiles.
+Actually running the comparison. On some occasions, Stan does not converge, my best guess is that the data are somehow pathological, but I didn't investigate thoroughly. You see that results for Stan and Inla are very similar both as point estimates and the distribution of posterior quantiles. The accuracy of the INLA approximation is also AFAIK going to improve with more data.
 
-```{r precision, cache = TRUE}
+```{r precision, results='asis',warning=FALSE,message=FALSE}
 library(skimr) #Uses skimr to summarize results easily
-results_precision = list()
-for(i in 1:10) {
-  results_precision[[i]] = test_precision(50)
+precision_results_file = paste0(cache_dir,"precision_results.csv")
+if(file.exists(precision_results_file)) {
+  results_precision_df = read.csv(precision_results_file)
+} else {
+  results_precision = list()
+  for(i in 1:100) {
+    results_precision[[i]] = test_precision(50)
+  }
+  
+  results_precision_df = do.call(rbind, results_precision)
+  write.csv(results_precision_df,precision_results_file,row.names = FALSE)
 }
-
-results_precision_df = do.call(rbind, results_precision)
-skim(results_precision_df)
+skim(results_precision_df) %>% kable()
 ```
 

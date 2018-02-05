@@ -1,0 +1,867 @@
+---
+title: "A gentle Stan vs. INLA comparison"
+date: 2018-02-02
+output: html_notebook
+tags: ["R","Stan","INLA"]
+---
+
+
+
+<p>Not long ago, I came across a nice blogpost by Kahtryn Morrison called <a href="https://www.precision-analytics.ca/blog-1/inla">A gentle INLA tutorial</a>. The blog was nice and helped me better appreciate INLA. But as a fan of the Stan probabilistic language, I felt that comparing INLA to JAGS is not really that relevant, as Stan should - at least in theory - be way faster and better than JAGS. Here, I ran a comparison of INLA to Stan on the second example called “Poisson GLM with an iid random effect”.</p>
+<p><strong>The TLDR is:</strong> For this model, Stan scales considerably better than JAGS, but still cannot scale to very large model. Also, for this model Stan and INLA give almost the same results. It seems that Stan becomes useful only when your model cannot be coded in INLA.</p>
+<p>Pleas let me know (via an <a href="https://github.com/martinmodrak/blog/issues">issue on GitHub</a>) should you find any error or anything else that should be included in this post. Also, if you run the experiment on a different machine and/or with different seed, let me know the results.</p>
+<p>Here are the original numbers from Kathryn’s blog:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">N</th>
+<th align="left">kathryn_rjags</th>
+<th align="right">kathryn_rinla</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">100</td>
+<td align="left">30.394</td>
+<td align="right">0.383</td>
+</tr>
+<tr class="even">
+<td align="right">500</td>
+<td align="left">142.532</td>
+<td align="right">1.243</td>
+</tr>
+<tr class="odd">
+<td align="right">5000</td>
+<td align="left">1714.468</td>
+<td align="right">5.768</td>
+</tr>
+<tr class="even">
+<td align="right">25000</td>
+<td align="left">8610.32</td>
+<td align="right">30.077</td>
+</tr>
+<tr class="odd">
+<td align="right">100000</td>
+<td align="left">got bored after 6 hours</td>
+<td align="right">166.819</td>
+</tr>
+</tbody>
+</table>
+<p><em>Note on running the code: Installing RStan is unfortunately not as straightforward as running install.packages. Please consult <a href="https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started" class="uri">https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started</a> if you don’t have RStan already installed. The whole notebook runs for a few hours.</em></p>
+<div id="the-comparison" class="section level2">
+<h2>The comparison</h2>
+<p>Let’s setup our libraries.</p>
+<pre class="r"><code>library(rstan)
+library(brms)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+library(INLA)
+library(tidyverse)
+set.seed(6619414)</code></pre>
+<p>The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a rerun.</p>
+<pre class="r"><code>cache_dir = &quot;_stan_vs_inla_cache/&quot;
+if(!dir.exists(cache_dir)){
+  dir.create(cache_dir)
+}</code></pre>
+<p>Let’s start by simulating data</p>
+<pre class="r"><code>#The sizes of datasets to work with
+N_values = c(100, 500, 5000, 25000)
+data = list()
+for(N in N_values) {
+  x = rnorm(N, mean=5,sd=1) 
+  nu = rnorm(N,0,0.1)
+  mu = exp(1 + 0.5*x + nu) 
+  y = rpois(N,mu) 
+  
+  
+  data[[N]] = list(
+    N = N,
+    x = x,
+    y = y
+  )  
+}</code></pre>
+<div id="measuring-stan" class="section level3">
+<h3>Measuring Stan</h3>
+<p>Here is the model code in Stan (it is good practice to put it into a file, but I wanted to make this post self-contained). It is almost 1-1 rewrite of the original JAGS code, with few important changes:</p>
+<ul>
+<li>JAGS parametrizes normal distribution via precision, Stan via sd. The model recomputes precision to sd.</li>
+<li>I added the ability to explicitly set parameters of the prior distributions as data which is useful later in this post</li>
+<li>With multilevel models, Stan works waaaaaay better with so-called non-centered parametrization. This means that instead of having <code>nu ~ N(0, nu_sigma), mu = alpha + beta * x + nu</code> we have <code>nu_normalized ~ N(0,1), mu = alpha + beta * x + nu_normalized * nu_sigma</code>. This gives exactly the same inferences, but results in a geometry that Stan can explore efficiently.</li>
+</ul>
+<p>There are also packages to let you specify common models (including this one) without writing Stan code, using syntax similar to R-INLA - checkout <a href="http://mc-stan.org/users/interfaces/rstanarm">rstanarm</a> and <a href="https://cran.r-project.org/web/packages/brms/index.html">brms</a>. The latter is more flexible, while the former is easier to install, as it does not depend on rstan and can be installed simply with <code>install.packages</code>.</p>
+<p>Note also that Stan developers would suggest against Gamma(0.01,0.01) prior on precision in favor of normal or Cauchy distribution on sd, see <a href="https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations" class="uri">https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations</a>.</p>
+<pre class="r"><code>model_code = &quot;
+  data {
+    int N;
+    vector[N] x;
+    int y[N];
+  
+    //Allowing to parametrize the priors (useful later)
+    real alpha_prior_mean;
+    real beta_prior_mean;
+    real&lt;lower=0&gt; alpha_beta_prior_precision;
+    real&lt;lower=0&gt; tau_nu_prior_shape;
+    real&lt;lower=0&gt; tau_nu_prior_rate; 
+  }
+
+  transformed data {
+    //Stan parametrizes normal with sd not precision
+    real alpha_beta_prior_sigma = sqrt(1 / alpha_beta_prior_precision);
+  }
+
+  parameters {
+    real alpha;
+    real beta;
+    vector[N] nu_normalized;
+    real&lt;lower=0&gt; tau_nu;
+  }
+
+  model {
+    real nu_sigma = sqrt(1 / tau_nu);
+    vector[N] nu = nu_normalized * nu_sigma;
+
+    //taking advantage of Stan&#39;s implicit vectorization here
+    nu_normalized ~ normal(0,1);
+    y ~ poisson_log(alpha + beta*x + nu); //The built-in poisson_log(x) === poisson(exp(x))
+
+    alpha  ~ normal(alpha_prior_mean, alpha_beta_prior_sigma);
+    beta  ~ normal(beta_prior_mean, alpha_beta_prior_sigma); 
+    tau_nu ~ gamma(tau_nu_prior_shape,tau_nu_prior_rate);
+  }
+
+//Uncomment this to have the model generate mu values as well
+//Currently commented out as storing the samples of mu consumes a lot of memory for the big models
+/*  
+  generated quantities {
+    vector[N] mu = exp(alpha + beta*x + nu_normalized * nu_sigma);
+  }
+*/
+&quot;
+
+model = stan_model(model_code = model_code)</code></pre>
+<p>Below is the code to make the actual measurements. Some caveats:</p>
+<ul>
+<li>The compilation of the Stan model is not counted (you can avoid it with rstanarm and need to do it only once otherwise)</li>
+<li>There is some overhead in transferring the posterior samples from Stan to R. This overhead is non-negligible for the larger models, but you can get rid of it by storing the samples in a file and reading them separately. The overhead is not measured here.</li>
+<li>Stan took &gt; 16 hours to converge for the larges data size (1e5) and then I had issues fitting the posterior samples into memory on my computer. Notably, R-Inla also crashed on my computer for this size. The largest size is thus excluded here, but I have to conclude that if you get bored after 6 hours, Stan is not practical for such a big model.</li>
+<li>I was not able to get rjags running in a reasonable amount of time, so I did not rerun the JAGS version of the model.</li>
+</ul>
+<pre class="r"><code>stan_times_file = paste0(cache_dir, &quot;stan_times.csv&quot;)
+stan_summary_file = paste0(cache_dir, &quot;stan_summary.csv&quot;)
+run_stan = TRUE
+if(file.exists(stan_times_file) &amp;&amp; file.exists(stan_summary_file)) {
+  stan_times = read.csv(stan_times_file)
+  stan_summary = read.csv(stan_summary_file) 
+  if(setequal(stan_times$N, N_values) &amp;&amp; setequal(stan_summary$N, N_values)) {
+    run_stan = FALSE
+  }
+} 
+
+if(run_stan) {
+  stan_times_values = numeric(length(N_values))
+  stan_summary_list = list()
+  step = 1
+  for(N in N_values) {
+    data_stan = data[[N]]
+    data_stan$alpha_prior_mean = 0
+    data_stan$beta_prior_mean = 0
+    data_stan$alpha_beta_prior_precision = 0.001
+    data_stan$tau_nu_prior_shape = 0.01
+    data_stan$tau_nu_prior_rate = 0.01
+    
+    
+    fit = sampling(model, data = data_stan);
+    stan_summary_list[[step]] = as.data.frame(rstan::summary(fit, pars = c(&quot;alpha&quot;,&quot;beta&quot;,&quot;tau_nu&quot;))$summary) %&gt;% rownames_to_column(&quot;parameter&quot;)
+    stan_summary_list[[step]]$N = N
+    
+    all_times = get_elapsed_time(fit)
+    stan_times_values[step] = max(all_times[,&quot;warmup&quot;] + all_times[,&quot;sample&quot;])
+    
+    step = step + 1
+  }
+  stan_times = data.frame(N = N_values, stan_time = stan_times_values)
+  stan_summary = do.call(rbind, stan_summary_list)
+  
+  write.csv(stan_times, stan_times_file,row.names = FALSE)
+  write.csv(stan_summary, stan_summary_file,row.names = FALSE)
+}</code></pre>
+</div>
+<div id="measuring-inla" class="section level3">
+<h3>Measuring INLA</h3>
+<pre class="r"><code>inla_times_file = paste0(cache_dir,&quot;inla_times.csv&quot;)
+inla_summary_file = paste0(cache_dir,&quot;inla_summary.csv&quot;)
+run_inla = TRUE
+if(file.exists(inla_times_file) &amp;&amp; file.exists(inla_summary_file)) {
+  inla_times = read.csv(inla_times_file)
+  inla_summary = read.csv(inla_summary_file) 
+  if(setequal(inla_times$N, N_values) &amp;&amp; setequal(inla_summary$N, N_values)) {
+    run_inla = FALSE
+  }
+} 
+
+if(run_inla) {
+  inla_times_values = numeric(length(N_values))
+  inla_summary_list = list()
+  step = 1
+  for(N in N_values) {
+    nu = 1:N 
+    fit_inla = inla(y ~ x + f(nu,model=&quot;iid&quot;), family = c(&quot;poisson&quot;), 
+               data = data[[N]], control.predictor=list(link=1)) 
+    
+    inla_times_values[step] = fit_inla$cpu.used[&quot;Total&quot;]
+    inla_summary_list[[step]] = rbind(fit_inla$summary.fixed %&gt;% select(-kld),fit_inla$summary.hyperpar) %&gt;%  rownames_to_column(&quot;parameter&quot;)
+    inla_summary_list[[step]]$N = N
+    
+    step = step + 1
+  }
+  inla_times = data.frame(N = N_values, inla_time = inla_times_values)
+  inla_summary = do.call(rbind, inla_summary_list)
+  
+  write.csv(inla_times, inla_times_file,row.names = FALSE)
+  write.csv(inla_summary, inla_summary_file,row.names = FALSE)
+}</code></pre>
+</div>
+<div id="checking-inferences" class="section level3">
+<h3>Checking inferences</h3>
+<p>Here we see side-by-side comparisons of the inferences and they seem pretty comparable between Stan and Inla:</p>
+<pre class="r"><code>for(N_to_show in N_values) {
+  print(kable(stan_summary %&gt;% filter(N == N_to_show) %&gt;% select(c(&quot;parameter&quot;,&quot;mean&quot;,&quot;sd&quot;)), caption = paste0(&quot;Stan results for N = &quot;, N_to_show)))
+  print(kable(inla_summary %&gt;% filter(N == N_to_show) %&gt;% select(c(&quot;parameter&quot;,&quot;mean&quot;,&quot;sd&quot;)), caption = paste0(&quot;INLA results for N = &quot;, N_to_show)))
+}</code></pre>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>Stan results for N = 100</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">alpha</td>
+<td align="right">1.013559</td>
+<td align="right">0.0989778</td>
+</tr>
+<tr class="even">
+<td align="left">beta</td>
+<td align="right">0.495539</td>
+<td align="right">0.0176988</td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu</td>
+<td align="right">162.001608</td>
+<td align="right">82.7700473</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>INLA results for N = 100</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">1.009037e+00</td>
+<td align="right">9.15248e-02</td>
+</tr>
+<tr class="even">
+<td align="left">x</td>
+<td align="right">4.971302e-01</td>
+<td align="right">1.61486e-02</td>
+</tr>
+<tr class="odd">
+<td align="left">Precision for nu</td>
+<td align="right">1.819654e+04</td>
+<td align="right">1.71676e+04</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>Stan results for N = 500</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">alpha</td>
+<td align="right">1.0046284</td>
+<td align="right">0.0555134</td>
+</tr>
+<tr class="even">
+<td align="left">beta</td>
+<td align="right">0.4977522</td>
+<td align="right">0.0102697</td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu</td>
+<td align="right">71.6301530</td>
+<td align="right">13.8264812</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>INLA results for N = 500</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">1.0053202</td>
+<td align="right">0.0538456</td>
+</tr>
+<tr class="even">
+<td align="left">x</td>
+<td align="right">0.4977124</td>
+<td align="right">0.0099593</td>
+</tr>
+<tr class="odd">
+<td align="left">Precision for nu</td>
+<td align="right">77.3311793</td>
+<td align="right">16.0255430</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>Stan results for N = 5000</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">alpha</td>
+<td align="right">1.009930</td>
+<td align="right">0.0159586</td>
+</tr>
+<tr class="even">
+<td align="left">beta</td>
+<td align="right">0.496859</td>
+<td align="right">0.0029250</td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu</td>
+<td align="right">101.548580</td>
+<td align="right">7.4655716</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>INLA results for N = 5000</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">1.0099282</td>
+<td align="right">0.0155388</td>
+</tr>
+<tr class="even">
+<td align="left">x</td>
+<td align="right">0.4968718</td>
+<td align="right">0.0028618</td>
+</tr>
+<tr class="odd">
+<td align="left">Precision for nu</td>
+<td align="right">103.1508773</td>
+<td align="right">7.6811740</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>Stan results for N = 25000</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">alpha</td>
+<td align="right">0.9874707</td>
+<td align="right">0.0066864</td>
+</tr>
+<tr class="even">
+<td align="left">beta</td>
+<td align="right">0.5019566</td>
+<td align="right">0.0012195</td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu</td>
+<td align="right">104.3599424</td>
+<td align="right">3.5391938</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption><span id="tab:unnamed-chunk-6">Table 1: </span>INLA results for N = 25000</caption>
+<thead>
+<tr class="header">
+<th align="left">parameter</th>
+<th align="right">mean</th>
+<th align="right">sd</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">(Intercept)</td>
+<td align="right">0.9876218</td>
+<td align="right">0.0067978</td>
+</tr>
+<tr class="even">
+<td align="left">x</td>
+<td align="right">0.5019341</td>
+<td align="right">0.0012452</td>
+</tr>
+<tr class="odd">
+<td align="left">Precision for nu</td>
+<td align="right">104.8948949</td>
+<td align="right">3.4415929</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="summary-of-the-timing" class="section level3">
+<h3>Summary of the timing</h3>
+<p>You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000.</p>
+<pre class="r"><code>my_results = merge.data.frame(inla_times, stan_times, by = &quot;N&quot;)
+kable(merge.data.frame(my_results, kathryn_results, by = &quot;N&quot;))</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">N</th>
+<th align="right">inla_time</th>
+<th align="right">stan_time</th>
+<th align="left">kathryn_rjags</th>
+<th align="right">kathryn_rinla</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">100</td>
+<td align="right">1.061742</td>
+<td align="right">1.885</td>
+<td align="left">30.394</td>
+<td align="right">0.383</td>
+</tr>
+<tr class="even">
+<td align="right">500</td>
+<td align="right">1.401597</td>
+<td align="right">11.120</td>
+<td align="left">142.532</td>
+<td align="right">1.243</td>
+</tr>
+<tr class="odd">
+<td align="right">5000</td>
+<td align="right">10.608704</td>
+<td align="right">388.514</td>
+<td align="left">1714.468</td>
+<td align="right">5.768</td>
+</tr>
+<tr class="even">
+<td align="right">25000</td>
+<td align="right">611.505543</td>
+<td align="right">5807.670</td>
+<td align="left">8610.32</td>
+<td align="right">30.077</td>
+</tr>
+</tbody>
+</table>
+<p>You could obviously do multiple runs to reduce uncertainty etc., but this post has already taken too much time of mine, so this will be left to others.</p>
+</div>
+</div>
+<div id="testing-quality-of-the-results" class="section level2">
+<h2>Testing quality of the results</h2>
+<p>I also had a hunch that maybe INLA is less precise than Stan, but that turned out to be based on an error. Thus, without much commentary, I put here my code to test this. Basically, I modify the random data generator to actually draw from priors (those priors are quite constrained to provide similar values of alpha, beta nad tau_nu as in the original). I than give both algorithms the knowledge of these priors. I compute both difference between true parameters and a point estimate (mean) and quantiles of the posterior distribution where the true parameter is found. If the algorithms give the best possible estimates, the distribution of such quantiles should be uniform over (0,1). Turns out INLA and Stan give almost exactly the same results for almost all runs and the differences in quality are (for this particular model) negligible.</p>
+<pre class="r"><code>test_precision = function(N) {
+  rejects &lt;- 0
+  repeat {
+    #Set the priors so that they generate similar parameters as in the example above
+    
+    alpha_beta_prior_precision = 5
+    prior_sigma = sqrt(1/alpha_beta_prior_precision)
+    alpha_prior_mean = 1
+    beta_prior_mean = 0.5
+    alpha = rnorm(1, alpha_prior_mean, prior_sigma)
+    beta = rnorm(1, beta_prior_mean, prior_sigma)
+    
+    tau_nu_prior_shape = 2
+    tau_nu_prior_rate = 0.01
+    tau_nu = rgamma(1,tau_nu_prior_shape,tau_nu_prior_rate)
+    sigma_nu = sqrt(1 / tau_nu)
+    
+    x = rnorm(N, mean=5,sd=1) 
+    
+    
+    nu =  rnorm(N,0,sigma_nu)
+    linear = alpha + beta*x + nu
+    
+    #Rejection sampling to avoid NAs and ill-posed problems
+    if(max(linear) &lt; 15) {
+      mu = exp(linear) 
+      y = rpois(N,mu) 
+      if(mean(y == 0) &lt; 0.7) {
+        break;
+      }
+    } 
+    rejects = rejects + 1
+  }
+  
+  #cat(rejects, &quot;rejects\n&quot;)
+  
+  
+  data = list(
+    N = N,
+    x = x,
+    y = y
+  )
+  #cat(&quot;A:&quot;,alpha,&quot;B:&quot;, beta, &quot;T:&quot;, tau_nu,&quot;\n&quot;)
+  #print(linear)
+  #print(data)
+  
+  #=============== Fit INLA
+  nu = 1:N 
+  fit_inla = inla(y ~ x + f(nu,model=&quot;iid&quot;,
+                  hyper=list(theta=list(prior=&quot;loggamma&quot;,param=c(tau_nu_prior_shape,tau_nu_prior_rate)))), family = c(&quot;poisson&quot;), 
+                  control.fixed = list(mean = beta_prior_mean, 
+                                       mean.intercept = alpha_prior_mean,
+                                       prec = alpha_beta_prior_precision,
+                                       prec.intercept = alpha_beta_prior_precision
+                                       ),
+             data = data, control.predictor=list(link=1)
+             ) 
+  
+  time_inla = fit_inla$cpu.used[&quot;Total&quot;]
+  
+  alpha_mean_diff_inla = fit_inla$summary.fixed[&quot;(Intercept)&quot;,&quot;mean&quot;] - alpha
+  beta_mean_diff_inla = fit_inla$summary.fixed[&quot;x&quot;,&quot;mean&quot;] - beta
+  tau_nu_mean_diff_inla = fit_inla$summary.hyperpar[,&quot;mean&quot;] - tau_nu
+  
+  alpha_q_inla = inla.pmarginal(alpha, fit_inla$marginals.fixed$`(Intercept)`)
+  beta_q_inla = inla.pmarginal(beta, fit_inla$marginals.fixed$x)
+  tau_nu_q_inla = inla.pmarginal(tau_nu, fit_inla$marginals.hyperpar$`Precision for nu`)
+
+  
+    
+  #================ Fit Stan
+  data_stan = data
+  data_stan$alpha_prior_mean = alpha_prior_mean
+  data_stan$beta_prior_mean = beta_prior_mean
+  data_stan$alpha_beta_prior_precision = alpha_beta_prior_precision
+  data_stan$tau_nu_prior_shape = tau_nu_prior_shape
+  data_stan$tau_nu_prior_rate = tau_nu_prior_rate
+  
+  fit = sampling(model, data = data_stan, control = list(adapt_delta = 0.95)); 
+  all_times = get_elapsed_time(fit)
+  max_total_time_stan = max(all_times[,&quot;warmup&quot;] + all_times[,&quot;sample&quot;])
+
+  samples = rstan::extract(fit, pars = c(&quot;alpha&quot;,&quot;beta&quot;,&quot;tau_nu&quot;))
+  alpha_mean_diff_stan = mean(samples$alpha) - alpha
+  beta_mean_diff_stan = mean(samples$beta) - beta
+  tau_nu_mean_diff_stan = mean(samples$tau_nu) - tau_nu
+  
+  alpha_q_stan = ecdf(samples$alpha)(alpha)
+  beta_q_stan = ecdf(samples$beta)(beta)
+  tau_nu_q_stan = ecdf(samples$tau_nu)(tau_nu)
+  
+  return(data.frame(time_rstan = max_total_time_stan,
+                    time_rinla = time_inla,
+                    alpha_mean_diff_stan = alpha_mean_diff_stan,
+                    beta_mean_diff_stan = beta_mean_diff_stan,
+                    tau_nu_mean_diff_stan = tau_nu_mean_diff_stan,
+                    alpha_q_stan = alpha_q_stan,
+                    beta_q_stan = beta_q_stan,
+                    tau_nu_q_stan = tau_nu_q_stan,
+                    alpha_mean_diff_inla = alpha_mean_diff_inla,
+                    beta_mean_diff_inla = beta_mean_diff_inla,
+                    tau_nu_mean_diff_inla = tau_nu_mean_diff_inla,
+                    alpha_q_inla= alpha_q_inla,
+                    beta_q_inla = beta_q_inla,
+                    tau_nu_q_inla = tau_nu_q_inla
+                    ))
+}</code></pre>
+<p>Actually running the comparison. On some occasions, Stan does not converge, my best guess is that the data are somehow pathological, but I didn’t investigate thoroughly. You see that results for Stan and Inla are very similar both as point estimates and the distribution of posterior quantiles. The accuracy of the INLA approximation is also AFAIK going to improve with more data.</p>
+<pre class="r"><code>library(skimr) #Uses skimr to summarize results easily
+precision_results_file = paste0(cache_dir,&quot;precision_results.csv&quot;)
+if(file.exists(precision_results_file)) {
+  results_precision_df = read.csv(precision_results_file)
+} else {
+  results_precision = list()
+  for(i in 1:100) {
+    results_precision[[i]] = test_precision(50)
+  }
+  
+  results_precision_df = do.call(rbind, results_precision)
+  write.csv(results_precision_df,precision_results_file,row.names = FALSE)
+}
+skim(results_precision_df) %&gt;% kable()</code></pre>
+<p>Skim summary statistics<br />
+n obs: 100<br />
+n variables: 15</p>
+<p>Variable type: factor</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">variable</th>
+<th align="left">missing</th>
+<th align="left">complete</th>
+<th align="left">n</th>
+<th align="left">n_unique</th>
+<th align="left">top_counts</th>
+<th align="left">ordered</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">X</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">Tot: 1, Tot: 1, Tot: 1, Tot: 1</td>
+<td align="left">FALSE</td>
+</tr>
+</tbody>
+</table>
+<p>Variable type: numeric</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">variable</th>
+<th align="left">missing</th>
+<th align="left">complete</th>
+<th align="left">n</th>
+<th align="left">mean</th>
+<th align="left">sd</th>
+<th align="left">p0</th>
+<th align="left">p25</th>
+<th align="left">median</th>
+<th align="left">p75</th>
+<th align="left">p100</th>
+<th align="left">hist</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">alpha_mean_diff_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">-0.0021</td>
+<td align="left">0.2</td>
+<td align="left">-0.85</td>
+<td align="left">-0.094</td>
+<td align="left">0.0023</td>
+<td align="left">0.095</td>
+<td align="left">0.53</td>
+<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2587><U+2587><U+2581><U+2581></td>
+</tr>
+<tr class="even">
+<td align="left">alpha_mean_diff_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">-0.0033</td>
+<td align="left">0.2</td>
+<td align="left">-0.84</td>
+<td align="left">-0.097</td>
+<td align="left">-0.00012</td>
+<td align="left">0.093</td>
+<td align="left">0.52</td>
+<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2587><U+2587><U+2581><U+2582></td>
+</tr>
+<tr class="odd">
+<td align="left">alpha_q_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.5</td>
+<td align="left">0.29</td>
+<td align="left">0.00084</td>
+<td align="left">0.25</td>
+<td align="left">0.5</td>
+<td align="left">0.73</td>
+<td align="left">0.99</td>
+<td align="left"><U+2585><U+2587><U+2587><U+2586><U+2587><U+2586><U+2586><U+2587></td>
+</tr>
+<tr class="even">
+<td align="left">alpha_q_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.5</td>
+<td align="left">0.28</td>
+<td align="left">0.001</td>
+<td align="left">0.26</td>
+<td align="left">0.5</td>
+<td align="left">0.73</td>
+<td align="left">0.99</td>
+<td align="left"><U+2585><U+2587><U+2587><U+2586><U+2587><U+2586><U+2586><U+2587></td>
+</tr>
+<tr class="odd">
+<td align="left">beta_mean_diff_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">-0.00088</td>
+<td align="left">0.04</td>
+<td align="left">-0.12</td>
+<td align="left">-0.016</td>
+<td align="left">-0.001</td>
+<td align="left">0.014</td>
+<td align="left">0.17</td>
+<td align="left"><U+2581><U+2581><U+2583><U+2587><U+2582><U+2581><U+2581><U+2581></td>
+</tr>
+<tr class="even">
+<td align="left">beta_mean_diff_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">-0.001</td>
+<td align="left">0.04</td>
+<td align="left">-0.12</td>
+<td align="left">-0.016</td>
+<td align="left">-5e-04</td>
+<td align="left">0.014</td>
+<td align="left">0.16</td>
+<td align="left"><U+2581><U+2581><U+2582><U+2587><U+2582><U+2581><U+2581><U+2581></td>
+</tr>
+<tr class="odd">
+<td align="left">beta_q_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.51</td>
+<td align="left">0.28</td>
+<td align="left">0.0068</td>
+<td align="left">0.26</td>
+<td align="left">0.52</td>
+<td align="left">0.75</td>
+<td align="left">1</td>
+<td align="left"><U+2586><U+2586><U+2585><U+2586><U+2587><U+2585><U+2586><U+2586></td>
+</tr>
+<tr class="even">
+<td align="left">beta_q_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.51</td>
+<td align="left">0.28</td>
+<td align="left">0.0065</td>
+<td align="left">0.27</td>
+<td align="left">0.51</td>
+<td align="left">0.75</td>
+<td align="left">1</td>
+<td align="left"><U+2586><U+2586><U+2585><U+2587><U+2586><U+2585><U+2586><U+2586></td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu_mean_diff_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">4.45</td>
+<td align="left">90.17</td>
+<td align="left">-338.58</td>
+<td align="left">-26.74</td>
+<td align="left">4.49</td>
+<td align="left">53.38</td>
+<td align="left">193</td>
+<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2585><U+2587><U+2583><U+2582></td>
+</tr>
+<tr class="even">
+<td align="left">tau_nu_mean_diff_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">5.21</td>
+<td align="left">90</td>
+<td align="left">-339.89</td>
+<td align="left">-24.62</td>
+<td align="left">4.29</td>
+<td align="left">54.48</td>
+<td align="left">191.94</td>
+<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2585><U+2587><U+2583><U+2582></td>
+</tr>
+<tr class="odd">
+<td align="left">tau_nu_q_inla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.53</td>
+<td align="left">0.26</td>
+<td align="left">0.023</td>
+<td align="left">0.32</td>
+<td align="left">0.52</td>
+<td align="left">0.74</td>
+<td align="left">0.99</td>
+<td align="left"><U+2583><U+2585><U+2586><U+2586><U+2587><U+2586><U+2585><U+2585></td>
+</tr>
+<tr class="even">
+<td align="left">tau_nu_q_stan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.53</td>
+<td align="left">0.26</td>
+<td align="left">0.021</td>
+<td align="left">0.32</td>
+<td align="left">0.53</td>
+<td align="left">0.75</td>
+<td align="left">0.99</td>
+<td align="left"><U+2583><U+2585><U+2585><U+2586><U+2587><U+2583><U+2585><U+2585></td>
+</tr>
+<tr class="odd">
+<td align="left">time_rinla</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">0.97</td>
+<td align="left">0.093</td>
+<td align="left">0.86</td>
+<td align="left">0.91</td>
+<td align="left">0.93</td>
+<td align="left">0.98</td>
+<td align="left">1.32</td>
+<td align="left"><U+2587><U+2587><U+2582><U+2581><U+2581><U+2581><U+2581><U+2581></td>
+</tr>
+<tr class="even">
+<td align="left">time_rstan</td>
+<td align="left">0</td>
+<td align="left">100</td>
+<td align="left">100</td>
+<td align="left">1.79</td>
+<td align="left">1.4</td>
+<td align="left">0.55</td>
+<td align="left">0.89</td>
+<td align="left">1.45</td>
+<td align="left">2.09</td>
+<td align="left">10.04</td>
+<td align="left"><U+2587><U+2582><U+2581><U+2581><U+2581><U+2581><U+2581><U+2581></td>
+</tr>
+</tbody>
+</table>
+</div>
