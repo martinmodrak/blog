@@ -1,6 +1,6 @@
 ---
 title: "About"
-date: "2018-02-02"
+date: "2018-02-01"
 ---
 
 This is a personal webpage/plog of Martin Modrák, an academic researcher in bioinformatics, currently at [Institute of Microbiology](http://www.mbucas.cz) of the Czech Academy of Sciences, [laboratory of bioinformatics](http://lab126.mbu.cas.cz).

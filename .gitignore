@@ -35,5 +35,4 @@ vignettes/*.pdf
 
 blogdown/
 public/
-themes/
 .Rproj.user
