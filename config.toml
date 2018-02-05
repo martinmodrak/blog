@@ -7,7 +7,7 @@ canonifyurls = true
 languagecode = "en"
 googleAnalytics = ""
 disqusShortname = ""
-ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$"]
+ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$","\\.nb\\.html$"]
 
 disable_mathjax = false
 

@@ -395,6 +395,15 @@ if(file.exists(precision_results_file)) {
   results_precision_df = do.call(rbind, results_precision)
   write.csv(results_precision_df,precision_results_file,row.names = FALSE)
 }
-skim(results_precision_df) %>% kable()
+
+skimmed = results_precision_df %>% select(-X) %>% skim() 
+#Now a hack to display skim histograms properly in the output:
+skimmed_better = skimmed %>% rowwise() %>%  mutate(formatted = 
+     if_else(stat == "hist", 
+         utf8ToInt(formatted) %>% as.character() %>% paste0("&#", . ,";", collapse = ""), 
+         formatted))  
+mostattributes(skimmed_better) = attributes(skimmed)
+
+skimmed_better %>% kable(escape = FALSE)
 ```
 

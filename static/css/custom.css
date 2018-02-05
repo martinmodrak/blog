@@ -1,0 +1,15 @@
+table {
+	border-collapse:collapse;
+}
+
+th, td {
+	border:none;
+	padding:0.4em;
+}
+
+th { 
+	border-bottom:1px black solid;
+	font-weight:bold;
+}
+
+tr:nth-child(even) {background: #EEE}

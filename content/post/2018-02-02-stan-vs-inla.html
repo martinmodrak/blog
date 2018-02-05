@@ -639,35 +639,19 @@ if(file.exists(precision_results_file)) {
   results_precision_df = do.call(rbind, results_precision)
   write.csv(results_precision_df,precision_results_file,row.names = FALSE)
 }
-skim(results_precision_df) %&gt;% kable()</code></pre>
+
+skimmed = results_precision_df %&gt;% select(-X) %&gt;% skim() 
+#Now a hack to display skim histograms properly in the output:
+skimmed_better = skimmed %&gt;% rowwise() %&gt;%  mutate(formatted = 
+     if_else(stat == &quot;hist&quot;, 
+         utf8ToInt(formatted) %&gt;% as.character() %&gt;% paste0(&quot;&amp;#&quot;, . ,&quot;;&quot;, collapse = &quot;&quot;), 
+         formatted))  
+mostattributes(skimmed_better) = attributes(skimmed)
+
+skimmed_better %&gt;% kable(escape = FALSE)</code></pre>
 <p>Skim summary statistics<br />
 n obs: 100<br />
-n variables: 15</p>
-<p>Variable type: factor</p>
-<table>
-<thead>
-<tr class="header">
-<th align="left">variable</th>
-<th align="left">missing</th>
-<th align="left">complete</th>
-<th align="left">n</th>
-<th align="left">n_unique</th>
-<th align="left">top_counts</th>
-<th align="left">ordered</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td align="left">X</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
-<td align="left">100</td>
-<td align="left">Tot: 1, Tot: 1, Tot: 1, Tot: 1</td>
-<td align="left">FALSE</td>
-</tr>
-</tbody>
-</table>
+n variables: 14</p>
 <p>Variable type: numeric</p>
 <table>
 <thead>
@@ -699,7 +683,7 @@ n variables: 15</p>
 <td align="left">0.0023</td>
 <td align="left">0.095</td>
 <td align="left">0.53</td>
-<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2587><U+2587><U+2581><U+2581></td>
+<td align="left">▁▁▁▂▇▇▁▁</td>
 </tr>
 <tr class="even">
 <td align="left">alpha_mean_diff_stan</td>
@@ -713,7 +697,7 @@ n variables: 15</p>
 <td align="left">-0.00012</td>
 <td align="left">0.093</td>
 <td align="left">0.52</td>
-<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2587><U+2587><U+2581><U+2582></td>
+<td align="left">▁▁▁▂▇▇▁▂</td>
 </tr>
 <tr class="odd">
 <td align="left">alpha_q_inla</td>
@@ -727,7 +711,7 @@ n variables: 15</p>
 <td align="left">0.5</td>
 <td align="left">0.73</td>
 <td align="left">0.99</td>
-<td align="left"><U+2585><U+2587><U+2587><U+2586><U+2587><U+2586><U+2586><U+2587></td>
+<td align="left">▅▇▇▆▇▆▆▇</td>
 </tr>
 <tr class="even">
 <td align="left">alpha_q_stan</td>
@@ -741,7 +725,7 @@ n variables: 15</p>
 <td align="left">0.5</td>
 <td align="left">0.73</td>
 <td align="left">0.99</td>
-<td align="left"><U+2585><U+2587><U+2587><U+2586><U+2587><U+2586><U+2586><U+2587></td>
+<td align="left">▅▇▇▆▇▆▆▇</td>
 </tr>
 <tr class="odd">
 <td align="left">beta_mean_diff_inla</td>
@@ -755,7 +739,7 @@ n variables: 15</p>
 <td align="left">-0.001</td>
 <td align="left">0.014</td>
 <td align="left">0.17</td>
-<td align="left"><U+2581><U+2581><U+2583><U+2587><U+2582><U+2581><U+2581><U+2581></td>
+<td align="left">▁▁▃▇▂▁▁▁</td>
 </tr>
 <tr class="even">
 <td align="left">beta_mean_diff_stan</td>
@@ -769,7 +753,7 @@ n variables: 15</p>
 <td align="left">-5e-04</td>
 <td align="left">0.014</td>
 <td align="left">0.16</td>
-<td align="left"><U+2581><U+2581><U+2582><U+2587><U+2582><U+2581><U+2581><U+2581></td>
+<td align="left">▁▁▂▇▂▁▁▁</td>
 </tr>
 <tr class="odd">
 <td align="left">beta_q_inla</td>
@@ -783,7 +767,7 @@ n variables: 15</p>
 <td align="left">0.52</td>
 <td align="left">0.75</td>
 <td align="left">1</td>
-<td align="left"><U+2586><U+2586><U+2585><U+2586><U+2587><U+2585><U+2586><U+2586></td>
+<td align="left">▆▆▅▆▇▅▆▆</td>
 </tr>
 <tr class="even">
 <td align="left">beta_q_stan</td>
@@ -797,7 +781,7 @@ n variables: 15</p>
 <td align="left">0.51</td>
 <td align="left">0.75</td>
 <td align="left">1</td>
-<td align="left"><U+2586><U+2586><U+2585><U+2587><U+2586><U+2585><U+2586><U+2586></td>
+<td align="left">▆▆▅▇▆▅▆▆</td>
 </tr>
 <tr class="odd">
 <td align="left">tau_nu_mean_diff_inla</td>
@@ -811,7 +795,7 @@ n variables: 15</p>
 <td align="left">4.49</td>
 <td align="left">53.38</td>
 <td align="left">193</td>
-<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2585><U+2587><U+2583><U+2582></td>
+<td align="left">▁▁▁▂▅▇▃▂</td>
 </tr>
 <tr class="even">
 <td align="left">tau_nu_mean_diff_stan</td>
@@ -825,7 +809,7 @@ n variables: 15</p>
 <td align="left">4.29</td>
 <td align="left">54.48</td>
 <td align="left">191.94</td>
-<td align="left"><U+2581><U+2581><U+2581><U+2582><U+2585><U+2587><U+2583><U+2582></td>
+<td align="left">▁▁▁▂▅▇▃▂</td>
 </tr>
 <tr class="odd">
 <td align="left">tau_nu_q_inla</td>
@@ -839,7 +823,7 @@ n variables: 15</p>
 <td align="left">0.52</td>
 <td align="left">0.74</td>
 <td align="left">0.99</td>
-<td align="left"><U+2583><U+2585><U+2586><U+2586><U+2587><U+2586><U+2585><U+2585></td>
+<td align="left">▃▅▆▆▇▆▅▅</td>
 </tr>
 <tr class="even">
 <td align="left">tau_nu_q_stan</td>
@@ -853,7 +837,7 @@ n variables: 15</p>
 <td align="left">0.53</td>
 <td align="left">0.75</td>
 <td align="left">0.99</td>
-<td align="left"><U+2583><U+2585><U+2585><U+2586><U+2587><U+2583><U+2585><U+2585></td>
+<td align="left">▃▅▅▆▇▃▅▅</td>
 </tr>
 <tr class="odd">
 <td align="left">time_rinla</td>
@@ -867,7 +851,7 @@ n variables: 15</p>
 <td align="left">0.93</td>
 <td align="left">0.98</td>
 <td align="left">1.32</td>
-<td align="left"><U+2587><U+2587><U+2582><U+2581><U+2581><U+2581><U+2581><U+2581></td>
+<td align="left">▇▇▂▁▁▁▁▁</td>
 </tr>
 <tr class="even">
 <td align="left">time_rstan</td>
@@ -881,7 +865,7 @@ n variables: 15</p>
 <td align="left">1.45</td>
 <td align="left">2.09</td>
 <td align="left">10.04</td>
-<td align="left"><U+2587><U+2582><U+2581><U+2581><U+2581><U+2581><U+2581><U+2581></td>
+<td align="left">▇▂▁▁▁▁▁▁</td>
 </tr>
 </tbody>
 </table>
