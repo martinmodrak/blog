@@ -47,10 +47,10 @@ tags: ["R","Stan","INLA"]
 </tr>
 </tbody>
 </table>
-<p><em>Note on running the code: Installing RStan is unfortunately not as straightforward as running install.packages. Please consult <a href="https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started" class="uri">https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started</a> if you don’t have RStan already installed. The whole notebook runs for a few hours.</em></p>
+<p><em>Full source of this post is available at <a href="https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd" class="uri">https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd</a> Keep in mind that installing RStan is unfortunately not as straightforward as running install.packages. Please consult <a href="https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started" class="uri">https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started</a> if you don’t have RStan already installed.</em></p>
 <div id="the-model" class="section level2">
 <h2>The model</h2>
-<p>The model we are interested in is a simple GLM with partial pooling of a random effec</p>
+<p>The model we are interested in is a simple GLM with partial pooling of a random effect:</p>
 <pre><code>y_i ~ poisson(mu_i)
 log(mu_i) ~ alpha + beta * x_i + nu_i
 nu_i ~ normal(0, tau_nu)</code></pre>
@@ -65,7 +65,7 @@ options(mc.cores = parallel::detectCores())
 library(INLA)
 library(tidyverse)
 set.seed(6619414)</code></pre>
-<p>The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a rerun.</p>
+<p>The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a complete rerun.</p>
 <pre class="r"><code>cache_dir = &quot;_stan_vs_inla_cache/&quot;
 if(!dir.exists(cache_dir)){
   dir.create(cache_dir)

@@ -13,3 +13,7 @@ th {
 }
 
 tr:nth-child(even) {background: #f7f7f7}
+
+#content {
+  text-align:justify;
+}

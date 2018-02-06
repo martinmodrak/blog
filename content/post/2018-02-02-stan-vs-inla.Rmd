@@ -19,11 +19,11 @@ kathryn_results = data.frame(N = c(100, 500, 5000, 25000, 100000), kathryn_rjags
 kable(kathryn_results)
 ```
 
-*Note on running the code: Installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed. The whole notebook runs for a few hours.*
+*Full source of this post is available at https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd Keep in mind that installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed.*
 
 ##The model
 
-The model we are interested in is a simple GLM with partial pooling of a random effec
+The model we are interested in is a simple GLM with partial pooling of a random effect:
 ```
 y_i ~ poisson(mu_i)
 log(mu_i) ~ alpha + beta * x_i + nu_i
@@ -43,7 +43,7 @@ library(tidyverse)
 set.seed(6619414)
 ```
 
-The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a rerun.
+The results are stored in files within the repository to let me rebuild the site with blogdown easily. Delete cache directory to force a complete rerun.
 ```{r}
 cache_dir = "_stan_vs_inla_cache/"
 if(!dir.exists(cache_dir)){
