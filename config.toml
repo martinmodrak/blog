@@ -5,7 +5,7 @@ theme = "hugo-tanka"
 author = "Martin Modrák"
 canonifyurls = true
 languagecode = "en"
-googleAnalytics = ""
+googleAnalytics = "UA-113619876-1"
 disqusShortname = ""
 ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$","\\.nb\\.html$"]
 
