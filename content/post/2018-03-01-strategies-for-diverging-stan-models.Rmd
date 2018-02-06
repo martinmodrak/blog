@@ -1,0 +1,86 @@
+---
+title: "Strategies for Diverging Stan Models"
+date: 2018-03-01
+draft: true
+---
+
+Currently those hints are scattered across Stan docs, discourse and mailing list. Here, I will try to bring them all to one place.
+
+Implementation problems vs. modelling problems (non-identifiability). Non-identifiability may be data-dependent.
+
+* Create a simulator for the model and work with simulated data first! (brms, rstanarm should create simulators automagically) -> This also forces you to carefully rethink your priors. If all else fails, rejection sampling to the rescue.
+
+* wrong priors (true values in the tail)
+
+* Visualisations: mcmc_parcoord, pairs (or shinystan)
+
+* non-centered parametrization
+
+* test_grad
+
+* move parameters to data
+
+* Tight priors around true parameters - useful for identifying non-identifiability
+
+```{r setup}
+library(rstan);
+set.seed(20180206)
+```
+
+
+```{r}
+stan_code <- "
+data {
+  int N;
+  vector[N] y;
+  vector[N] x;
+}
+
+parameters {
+  real b[2];
+  real<lower=0> sigma;
+}
+
+model {
+  y ~ normal(b[1] * x + b[2] * square(x), sigma);
+  sigma ~ normal(0,1);
+  b ~ normal(0,1);
+}
+"
+
+model <- stan_model(model_code = stan_code)
+```
+```{r}
+x <- c(1,2,3,4,1,2,3,4)
+sigma = 1
+data_ok <- list(
+  N = length(x),
+  x = x,
+  y = rnorm(length(x), x + x ^ 2, sigma)
+)
+
+fit_ok <- sampling(model, data = data_ok)
+print(fit_ok)
+
+# data_ok <- list(
+#   N = 5,
+#   x = c(1,2,3,4,5),
+#   y = c(1,2.5,3.7,6,7)
+# )
+
+```
+
+```{r}
+sigma = 1
+x = c(0,0.1,-0.1,0.05,0.9,1,1.1,0.95)
+data_divergent <- list(
+  N = length(x),
+  x = x,
+  y = rnorm(length(x), x + x ^ 2, sigma)
+)
+
+fit_divergent <- sampling(model, data = data_divergent)
+print(fit_divergent)
+
+```
+
