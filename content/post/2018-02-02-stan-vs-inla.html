@@ -640,6 +640,9 @@ if(file.exists(precision_results_file)) {
   write.csv(results_precision_df,precision_results_file,row.names = FALSE)
 }
 
+#Remove uninteresting skim statistics
+skim_with(numeric = list(missing = NULL, complete = NULL, n = NULL))
+
 skimmed = results_precision_df %&gt;% select(-X) %&gt;% skim() 
 #Now a hack to display skim histograms properly in the output:
 skimmed_better = skimmed %&gt;% rowwise() %&gt;%  mutate(formatted = 
@@ -657,9 +660,6 @@ n variables: 14</p>
 <thead>
 <tr class="header">
 <th align="left">variable</th>
-<th align="left">missing</th>
-<th align="left">complete</th>
-<th align="left">n</th>
 <th align="left">mean</th>
 <th align="left">sd</th>
 <th align="left">p0</th>
@@ -673,9 +673,6 @@ n variables: 14</p>
 <tbody>
 <tr class="odd">
 <td align="left">alpha_mean_diff_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">-0.0021</td>
 <td align="left">0.2</td>
 <td align="left">-0.85</td>
@@ -687,9 +684,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">alpha_mean_diff_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">-0.0033</td>
 <td align="left">0.2</td>
 <td align="left">-0.84</td>
@@ -701,9 +695,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">alpha_q_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.5</td>
 <td align="left">0.29</td>
 <td align="left">0.00084</td>
@@ -715,9 +706,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">alpha_q_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.5</td>
 <td align="left">0.28</td>
 <td align="left">0.001</td>
@@ -729,9 +717,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">beta_mean_diff_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">-0.00088</td>
 <td align="left">0.04</td>
 <td align="left">-0.12</td>
@@ -743,9 +728,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">beta_mean_diff_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">-0.001</td>
 <td align="left">0.04</td>
 <td align="left">-0.12</td>
@@ -757,9 +739,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">beta_q_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.51</td>
 <td align="left">0.28</td>
 <td align="left">0.0068</td>
@@ -771,9 +750,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">beta_q_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.51</td>
 <td align="left">0.28</td>
 <td align="left">0.0065</td>
@@ -785,9 +761,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">tau_nu_mean_diff_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">4.45</td>
 <td align="left">90.17</td>
 <td align="left">-338.58</td>
@@ -799,9 +772,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">tau_nu_mean_diff_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">5.21</td>
 <td align="left">90</td>
 <td align="left">-339.89</td>
@@ -813,9 +783,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">tau_nu_q_inla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.53</td>
 <td align="left">0.26</td>
 <td align="left">0.023</td>
@@ -827,9 +794,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">tau_nu_q_stan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.53</td>
 <td align="left">0.26</td>
 <td align="left">0.021</td>
@@ -841,9 +805,6 @@ n variables: 14</p>
 </tr>
 <tr class="odd">
 <td align="left">time_rinla</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">0.97</td>
 <td align="left">0.093</td>
 <td align="left">0.86</td>
@@ -855,9 +816,6 @@ n variables: 14</p>
 </tr>
 <tr class="even">
 <td align="left">time_rstan</td>
-<td align="left">0</td>
-<td align="left">100</td>
-<td align="left">100</td>
 <td align="left">1.79</td>
 <td align="left">1.4</td>
 <td align="left">0.55</td>

@@ -396,6 +396,9 @@ if(file.exists(precision_results_file)) {
   write.csv(results_precision_df,precision_results_file,row.names = FALSE)
 }
 
+#Remove uninteresting skim statistics
+skim_with(numeric = list(missing = NULL, complete = NULL, n = NULL))
+
 skimmed = results_precision_df %>% select(-X) %>% skim() 
 #Now a hack to display skim histograms properly in the output:
 skimmed_better = skimmed %>% rowwise() %>%  mutate(formatted = 
