@@ -6,7 +6,7 @@ author = "Martin Modrák"
 canonifyurls = true
 languagecode = "en"
 googleAnalytics = "UA-113619876-1"
-disqusShortname = ""
+disqusShortname = "martinmodrak"
 ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$","\\.nb\\.html$"]
 
 disable_mathjax = false
