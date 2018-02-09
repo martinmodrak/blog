@@ -28,7 +28,7 @@ set.seed(20180206)
 ```
 
 
-```{r}
+```{r cache=TRUE}
 stan_code <- "
 data {
   int N;
