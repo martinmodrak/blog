@@ -8,13 +8,23 @@ Currently those hints are scattered across Stan docs, discourse and mailing list
 
 Implementation problems vs. modelling problems (non-identifiability). Non-identifiability may be data-dependent.
 
+Start with simple models! Cannot repeat this enough (and I often don't follow this advice and then I am sad)
+
+Definition of divergent: https://groups.google.com/forum/#!topic/stan-users/UwuTNEp6X8w
+
+Directly translating models from JAGS/BUGS often fails (and there were reports that many JAGS models produce wrong results, 
+but no one noticed before they compared to Stan)
+
 * Create a simulator for the model and work with simulated data first! (brms, rstanarm should create simulators automagically) -> This also forces you to carefully rethink your priors. If all else fails, rejection sampling to the rescue.
+
+* Just change arguments (as in http://singmann.org/hierarchical-mpt-in-stan-i-dealing-with-convergent-transitions-via-control-arguments/)
 
 * wrong priors (true values in the tail)
 
-* Visualisations: mcmc_parcoord, pairs (or shinystan)
+* Visualisations: mcmc_parcoord, pairs (or shinystan) (some hints at http://mc-stan.org/misc/warnings.html)
 
 * non-centered parametrization
+http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html
 
 * test_grad
 
