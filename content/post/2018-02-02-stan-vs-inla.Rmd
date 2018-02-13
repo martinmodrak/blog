@@ -19,7 +19,7 @@ kathryn_results = data.frame(N = c(100, 500, 5000, 25000, 100000), kathryn_rjags
 kable(kathryn_results)
 ```
 
-*Full source of this post is available at https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd Keep in mind that installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed.*
+*Full source of this post is available at [this blog's Github repo](https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd). Keep in mind that installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed.*
 
 ##The model
 
