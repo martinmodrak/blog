@@ -1,0 +1,316 @@
+---
+title: "Identifying non-identifiability"
+date: 2018-03-01
+draft: true
+---
+
+
+
+<pre class="r"><code>library(tidyverse)</code></pre>
+<pre><code>## -- Attaching packages ------------------------------------------------------------------------------ tidyverse 1.2.1 --</code></pre>
+<pre><code>## &lt;U+221A&gt; ggplot2 2.2.1     &lt;U+221A&gt; purrr   0.2.4
+## &lt;U+221A&gt; tibble  1.4.2     &lt;U+221A&gt; dplyr   0.7.4
+## &lt;U+221A&gt; tidyr   0.8.0     &lt;U+221A&gt; stringr 1.2.0
+## &lt;U+221A&gt; readr   1.1.1     &lt;U+221A&gt; forcats 0.2.0</code></pre>
+<pre><code>## -- Conflicts --------------------------------------------------------------------------------- tidyverse_conflicts() --
+## x dplyr::filter() masks stats::filter()
+## x dplyr::lag()    masks stats::lag()</code></pre>
+<pre class="r"><code>library(rstan)</code></pre>
+<pre><code>## Loading required package: StanHeaders</code></pre>
+<pre><code>## rstan (Version 2.17.3, GitRev: 2e1f913d3ca3)</code></pre>
+<pre><code>## For execution on a local, multicore CPU with excess RAM we recommend calling
+## options(mc.cores = parallel::detectCores()).
+## To avoid recompilation of unchanged Stan programs, we recommend calling
+## rstan_options(auto_write = TRUE)</code></pre>
+<pre><code>## 
+## Attaching package: &#39;rstan&#39;</code></pre>
+<pre><code>## The following object is masked from &#39;package:tidyr&#39;:
+## 
+##     extract</code></pre>
+<pre class="r"><code>set.seed(20180206)</code></pre>
+<p>There are two groups of problems that lead to divergences, implementation problems vs. modelling problems. Non-identifiability may be data-dependent.</p>
+<pre class="r"><code>stan_code &lt;- &quot;
+data {
+  int N;
+  vector[N] y;
+  vector[N] x;
+}
+
+parameters {
+  real b[2];
+  real&lt;lower=0&gt; sigma;
+}
+
+model {
+  y ~ normal(b[1] * x + b[2] * square(x), sigma);
+  sigma ~ normal(0,1);
+  b ~ normal(0,1);
+}
+&quot;
+
+model &lt;- stan_model(model_code = stan_code)</code></pre>
+<pre><code>## In file included from C:/Users/Martin/Documents/R/win-library/3.4/BH/include/boost/config.hpp:39:0,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/BH/include/boost/math/tools/config.hpp:13,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/stan/math/rev/core/var.hpp:7,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/stan/math/rev/core/gevv_vvv_vari.hpp:5,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/stan/math/rev/core.hpp:12,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/stan/math/rev/mat.hpp:4,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/stan/math.hpp:4,
+##                  from C:/Users/Martin/Documents/R/win-library/3.4/StanHeaders/include/src/stan/model/model_header.hpp:4,
+##                  from file4f187b7d2f9b.cpp:8:
+## C:/Users/Martin/Documents/R/win-library/3.4/BH/include/boost/config/compiler/gcc.hpp:186:0: warning: &quot;BOOST_NO_CXX11_RVALUE_REFERENCES&quot; redefined
+##  #  define BOOST_NO_CXX11_RVALUE_REFERENCES
+##  ^
+## &lt;command-line&gt;:0:0: note: this is the location of the previous definition
+## cc1plus.exe: warning: unrecognized command line option &quot;-Wno-ignored-attributes&quot;</code></pre>
+<pre class="r"><code>x &lt;- c(1,2,3,4,1,2,3,4)
+sigma = 1
+data_ok &lt;- list(
+  N = length(x),
+  x = x,
+  y = rnorm(length(x), x + x ^ 2, sigma)
+)
+
+fit_ok &lt;- sampling(model, data = data_ok)</code></pre>
+<pre><code>## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 1).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.056 seconds (Warm-up)
+##                0.041 seconds (Sampling)
+##                0.097 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 2).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.055 seconds (Warm-up)
+##                0.053 seconds (Sampling)
+##                0.108 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 3).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.053 seconds (Warm-up)
+##                0.049 seconds (Sampling)
+##                0.102 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 4).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.06 seconds (Warm-up)
+##                0.06 seconds (Sampling)
+##                0.12 seconds (Total)</code></pre>
+<pre class="r"><code>print(fit_ok)</code></pre>
+<pre><code>## Inference for Stan model: 0a1ccee91072b0ca3398c72b05e699e8.
+## 4 chains, each with iter=2000; warmup=1000; thin=1; 
+## post-warmup draws per chain=1000, total post-warmup draws=4000.
+## 
+##        mean se_mean   sd  2.5%   25%   50%   75% 97.5% n_eff Rhat
+## b[1]   0.96    0.01 0.43  0.00  0.71  0.99  1.25  1.78  1112    1
+## b[2]   1.05    0.00 0.13  0.80  0.97  1.04  1.13  1.33  1123    1
+## sigma  0.86    0.01 0.26  0.50  0.68  0.81  0.98  1.52  1105    1
+## lp__  -4.15    0.04 1.38 -7.78 -4.80 -3.75 -3.12 -2.56  1092    1
+## 
+## Samples were drawn using NUTS(diag_e) at Fri Feb 16 21:55:52 2018.
+## For each parameter, n_eff is a crude measure of effective sample size,
+## and Rhat is the potential scale reduction factor on split chains (at 
+## convergence, Rhat=1).</code></pre>
+<pre class="r"><code># data_ok &lt;- list(
+#   N = 5,
+#   x = c(1,2,3,4,5),
+#   y = c(1,2.5,3.7,6,7)
+# )</code></pre>
+<pre class="r"><code>sigma = 1
+x = c(0,0.1,-0.1,0.05,0.9,1,1.1,0.95)
+data_divergent &lt;- list(
+  N = length(x),
+  x = x,
+  y = rnorm(length(x), x + x ^ 2, sigma)
+)
+
+fit_divergent &lt;- sampling(model, data = data_divergent)</code></pre>
+<pre><code>## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 1).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.028 seconds (Warm-up)
+##                0.027 seconds (Sampling)
+##                0.055 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 2).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.025 seconds (Warm-up)
+##                0.025 seconds (Sampling)
+##                0.05 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 3).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.027 seconds (Warm-up)
+##                0.03 seconds (Sampling)
+##                0.057 seconds (Total)
+## 
+## 
+## SAMPLING FOR MODEL &#39;0a1ccee91072b0ca3398c72b05e699e8&#39; NOW (CHAIN 4).
+## 
+## Gradient evaluation took 0 seconds
+## 1000 transitions using 10 leapfrog steps per transition would take 0 seconds.
+## Adjust your expectations accordingly!
+## 
+## 
+## Iteration:    1 / 2000 [  0%]  (Warmup)
+## Iteration:  200 / 2000 [ 10%]  (Warmup)
+## Iteration:  400 / 2000 [ 20%]  (Warmup)
+## Iteration:  600 / 2000 [ 30%]  (Warmup)
+## Iteration:  800 / 2000 [ 40%]  (Warmup)
+## Iteration: 1000 / 2000 [ 50%]  (Warmup)
+## Iteration: 1001 / 2000 [ 50%]  (Sampling)
+## Iteration: 1200 / 2000 [ 60%]  (Sampling)
+## Iteration: 1400 / 2000 [ 70%]  (Sampling)
+## Iteration: 1600 / 2000 [ 80%]  (Sampling)
+## Iteration: 1800 / 2000 [ 90%]  (Sampling)
+## Iteration: 2000 / 2000 [100%]  (Sampling)
+## 
+##  Elapsed Time: 0.03 seconds (Warm-up)
+##                0.029 seconds (Sampling)
+##                0.059 seconds (Total)</code></pre>
+<pre class="r"><code>print(fit_divergent)</code></pre>
+<pre><code>## Inference for Stan model: 0a1ccee91072b0ca3398c72b05e699e8.
+## 4 chains, each with iter=2000; warmup=1000; thin=1; 
+## post-warmup draws per chain=1000, total post-warmup draws=4000.
+## 
+##        mean se_mean   sd   2.5%   25%   50%   75% 97.5% n_eff Rhat
+## b[1]   0.80    0.02 0.76  -0.67  0.30  0.79  1.31  2.28  1925    1
+## b[2]   0.51    0.02 0.76  -0.99  0.00  0.51  1.02  1.99  2018    1
+## sigma  1.22    0.01 0.30   0.76  1.00  1.17  1.38  1.90  2568    1
+## lp__  -7.32    0.03 1.26 -10.72 -7.85 -6.99 -6.42 -5.90  1732    1
+## 
+## Samples were drawn using NUTS(diag_e) at Fri Feb 16 21:55:52 2018.
+## For each parameter, n_eff is a crude measure of effective sample size,
+## and Rhat is the potential scale reduction factor on split chains (at 
+## convergence, Rhat=1).</code></pre>

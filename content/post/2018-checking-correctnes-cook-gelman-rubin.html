@@ -1,0 +1,42 @@
+---
+title: "Checking Stan model correctnes with Cook, Gelman and Rubin"
+date: 2018-03-01
+draft: true
+---
+
+
+
+<p>How to test that your model works? Create a simulator for the model and work with simulated data first! (If you use <code>brms</code> or <code>rstanarm</code>, those should create simulators automagically). This means you know the true values and are able to test if the model recovered them. You can even take a more principled approach to evaluation as in (TODO Cook, Gelman, Rubin). Another advantage is that a simulator forces you to carefully rethink your priors. If you have <code>x ~ poisson(exp(a))</code> you quickly realize, you can’t put a <code>cauchy(0,1)</code> prior on <code>a</code> - you’ll just get a lot of NaNs.</p>
+<p>You can make Stan sample from your prior distributions by skipping everything except the prior distributions in the <code>model</code> block and drawing replicates in the <code>generated quantities</code> block (which you should any way for posterior predictive checks TODO link):</p>
+<pre><code>data {
+  int&lt;lower=0,upper=1&gt; prior_only;
+  int N;
+  vector[N] X;
+  vector[N] Y;
+}
+
+parameters {
+  real a;
+  real b;
+  real&lt;lower=0&gt; sigma;
+}
+
+model {
+  a ~ normal(0,1);
+  b ~ normal(0,1);
+  sigma ~ normal(0,1);
+
+  if (prior_only == 0) {
+    Y ~ normal(b * X + a, sigma);
+  }
+}
+
+generated quantities {
+  vector[N] Y_rep;
+  for(i in 1:N) {
+    Y_rep[i] = normal_rng(b * X[i] + a, sigma);
+  }
+}
+
+</code></pre>
+<p>Nevertheless I have personally found it useful to not use Stan for the simulator and write in R instead. The R implementation then serves as a double check that I do not have a stupid mistake in my Stan code.</p>
