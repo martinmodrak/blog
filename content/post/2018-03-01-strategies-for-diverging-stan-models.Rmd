@@ -1,6 +1,6 @@
 ---
 title: "Taming Divergences in Stan Models"
-date: 2018-03-01
+date: 2018-02-19
 ---
 
 Although my time with the [Stan language](http://mc-stan.org) has been enjoyable, there is one thing that is not fun when modelling with Stan. And it is the dreaded warning message:
