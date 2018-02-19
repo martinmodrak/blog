@@ -34,7 +34,7 @@ I don't want to keep you waiting, so below is a list of all strategies I have ev
 8) Try *non-centered parametrization* - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. [Case study - diagnosing a multilevel model
 ](http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html), [Betancourt & Girolami 2015](https://arxiv.org/pdf/1312.0906)
 
-9) Move parameters to the ```data``` block and set them to their true values. Then return them one by one to ```paremters``` block. Which parameter introduces the problems?
+9) Move parameters to the ```data``` block and set them to their true values (from simulated data). Then return them one by one to ```paremters``` block. Which parameter introduces the problems?
 
 10) Introduce tight priors centered at true parameter values. How tight need the priors to be to let the model fit? Useful for identifying multimodality.
 

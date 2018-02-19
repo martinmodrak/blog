@@ -21,7 +21,7 @@ Increasing adapt_delta above 0.8 may help.</code></pre>
 <li><p>Run Stan with the <code>test_grad</code> option.</p></li>
 <li><p><em>Reparametrize</em> your model to make your parameters independent (uncorrelated) and close to N(0,1) (a.k.a change the actual parameters and compute your parameters of interest in the <code>transformed parameters</code> block).</p></li>
 <li><p>Try <em>non-centered parametrization</em> - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. <a href="http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html">Case study - diagnosing a multilevel model</a>, <a href="https://arxiv.org/pdf/1312.0906">Betancourt &amp; Girolami 2015</a></p></li>
-<li><p>Move parameters to the <code>data</code> block and set them to their true values. Then return them one by one to <code>paremters</code> block. Which parameter introduces the problems?</p></li>
+<li><p>Move parameters to the <code>data</code> block and set them to their true values (from simulated data). Then return them one by one to <code>paremters</code> block. Which parameter introduces the problems?</p></li>
 <li><p>Introduce tight priors centered at true parameter values. How tight need the priors to be to let the model fit? Useful for identifying multimodality.</p></li>
 <li><p>Play a bit more with <code>adapt_delta</code>, <code>stepsize</code> and <code>max_treedepth</code>. <a href="http://singmann.org/hierarchical-mpt-in-stan-i-dealing-with-convergent-transitions-via-co%20ntrol-arguments/">Example</a></p></li>
 </ol>
