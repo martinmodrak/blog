@@ -13,6 +13,7 @@ Increasing adapt_delta above 0.8 may help.</code></pre>
 <h1>The strategies</h1>
 <p>I don’t want to keep you waiting, so below is a list of all strategies I have ever used to diagnose and/or remedy divergences:</p>
 <ol style="list-style-type: decimal">
+<li><p>Check your code. Twice. Divergences are almost as likely a result of a programming error as they are a truly statistical issue. Do all parameters have a prior? Do your array indices and for loops match?</p></li>
 <li><p>Make sure your model is <em>identifiable</em> - non-identifiability and/or multimodality (multiple local maxima of the posterior distributions) is a problem. <a href="http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html">Example - mixture models</a>.</p></li>
 <li><p>Play a bit more with <code>adapt_delta</code>, <code>stepsize</code> and <code>max_treedepth</code>. <a href="http://singmann.org/hierarchical-mpt-in-stan-i-dealing-with-convergent-transitions-via-co%20ntrol-arguments/">Example</a></p></li>
 <li><p>Run Stan with the <code>test_grad</code> option.</p></li>
