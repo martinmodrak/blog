@@ -168,9 +168,9 @@ Here, a good step size is a function of both location (smaller near the peak) an
 
 ## Bigger Picture
 
-This has been all pretty vague and folksy. Remeber these examples are there just to provide intuition. To be 100% correct, you need to go to the [NUTS paper](http://www.jmlr.org/papers/volume15/hoffman14a/hoffman14a.pdf) and delve in the math. The math is always correct.
+This has been all pretty vague and folksy. Remeber these examples are there just to provide intuition. To be 100% correct, you need to go to the [NUTS paper](http://www.jmlr.org/papers/volume15/hoffman14a/hoffman14a.pdf) and/or the [Conceptual Introduction to HMC paper](https://arxiv.org/abs/1701.02434) and delve in the math. The math is always correct.
 
-In particular all the above geometries **may** be difficult for NUTS and seeing them in visualisations hints at possible issues, they **may** also be handled just fine. In fact, I wouldn't be surprised if Stan worked with almost anything in two dimensions. Weak linear correlations that form wide ridges are also - in my experience - quite likely to be sampled well, even in higher dimensions. The issues arise when regions of non-negligible density are very narrow in some directions and much wider in others and rescaling each dimension individually won't help. And finally, keep in mind that the posterios we discussed are even more difficult for Gibbs or other older samplers - and Gibbs will not even let you know there was a problem.
+In particular all the above geometries **may** be difficult for NUTS and seeing them in visualisations hints at possible issues, but they **may** also be handled just fine. In fact, I wouldn't be surprised if Stan worked with almost anything in two dimensions. Weak linear correlations that form wide ridges are also - in my experience - quite likely to be sampled well, even in higher dimensions. The issues arise when regions of non-negligible density are very narrow in some directions and much wider in others and rescaling each dimension individually won't help. And finally, keep in mind that the posterios we discussed are even more difficult for Gibbs or other older samplers - and Gibbs will not even let you know there was a problem.
 
 # Love Thy Divergences
 
