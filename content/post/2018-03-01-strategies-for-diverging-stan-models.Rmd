@@ -29,7 +29,7 @@ ntrol-arguments/)
 
 5) *Reparametrize* your model to make your parameters independent (uncorrelated) and close to N(0,1) (a.k.a change the actual parameters and compute your parameters of interest in the ```transformed parameters``` block). 
 
-6) Try *non-centered parametrization* - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. [Example - multilevel model
+6) Try *non-centered parametrization* - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. [Example - divergences and bias in a multilevel model
 ](http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html), [Betancourt & Girolami 2015](https://arxiv.org/pdf/1312.0906)
 
 7) Check your priors, if the model is sampling heavily in the very tails of your priors or on the boundaries of parameter constraints, this is a bad sign.
