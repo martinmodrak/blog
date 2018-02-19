@@ -10,15 +10,13 @@ There were X divergent transitions after warmup.
 Increasing adapt_delta above 0.8 may help.
 ```
 
-Now once you have increased ```adapt_delta``` to no avail, what should you do? Divergences (and max-treedepth and low E-BFMI warnings alike) tell you there is something wrong with your model, but does not exactly tell you what. There are numerous tricks and strategies to diagnose convergence problems, but currently, those are scattered across [Stan documentation](http://mc-stan.org/users/documentation/), [Discourse](http://discourse.mc-stan.org/) and the [old mailing list](https://groups.google.com/forum/#!forum/stan-users). Here, I will try to bring all the tricks that helped me at some point to one place for the reference of future desperate modellers.
-
-**Caveat:** *I am not a statistician and my understanding of Stan, the NUTS sampler and other technicalities is limited, so I might be wrong in some of my assertions. Please correct me, if you find mistakes.*
+Now once you have increased ```adapt_delta``` to no avail, what should you do? Divergences (and max-treedepth and low E-BFMI warnings alike) tell you there is something wrong with your model, but do not exactly tell you what. There are numerous tricks and strategies to diagnose convergence problems, but currently, those are scattered across [Stan documentation](http://mc-stan.org/users/documentation/), [Discourse](http://discourse.mc-stan.org/) and the [old mailing list](https://groups.google.com/forum/#!forum/stan-users). Here, I will try to bring all the tricks that helped me at some point to one place for the reference of future desperate modellers.
 
 # The strategies
 
 I don't want to keep you waiting, so below is a list of all strategies I have ever used to diagnose and/or remedy divergences:
 
-1) Make sure your model is *identifiable* - non-identifiability and/or multimodality (multiple local maxima of the posterior distributions) is a problem. [Example](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html).
+1) Make sure your model is *identifiable* - non-identifiability and/or multimodality (multiple local maxima of the posterior distributions) is a problem. [Example - mixture models](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html).
 
 2) Play a bit more with ```adapt_delta```, ```stepsize``` and ```max_treedepth```. [Example](http://singmann.org/hierarchical-mpt-in-stan-i-dealing-with-convergent-transitions-via-co
 ntrol-arguments/)
@@ -29,10 +27,10 @@ ntrol-arguments/)
 
 5) *Reparametrize* your model to make your parameters independent (uncorrelated) and close to N(0,1) (a.k.a change the actual parameters and compute your parameters of interest in the ```transformed parameters``` block). 
 
-6) Try *non-centered parametrization* - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. [Example
-](http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html)
+6) Try *non-centered parametrization* - this is a special case of reparametrization that is so frequently useful that it deserves its own bullet. [Example - multilevel model
+](http://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html), [Betancourt & Girolami 2015](https://arxiv.org/pdf/1312.0906)
 
-7) Check your priors, if the model is sampling in the tails of your priors or on the boundaries of parameter constraints, this is a bad sign.
+7) Check your priors, if the model is sampling heavily in the very tails of your priors or on the boundaries of parameter constraints, this is a bad sign.
 
 8) Create a simulated dataset with known true values of all parameters. It is useful for so many things.
 
@@ -43,11 +41,13 @@ In the coming weeks I hope to be able to provide separate posts on some of the b
 
 # Before We Delve In
 
+**Caveat:** *I am not a statistician and my understanding of Stan, the NUTS sampler and other technicalities is limited, so I might be wrong in some of my assertions. Please correct me, if you find mistakes.*
+
 Make sure to follow [Stan Best practices](https://github.com/stan-dev/stan/wiki/Stan-Best-Practices). Especially, **start with a simple model**, make sure it works and add complexity step by step. I really cannot repeat this enough. To be honest, I often don't follow this advice myself, because just writing the full model down is so much fun. To be more honest, this has always resulted in me being sad and a lots of wasted time.
 
 Also note that directly translating models from JAGS/BUGS often fails as Stan requires different modelling approaches. Stan developers have experienced first hand that some JAGS models produce wrong results and do not converge even in JAGS, but no one noticed before they compared their output to results from Stan.
 
-# What is a divergence?
+# What Is a Divergence?
 
 
 Following the Stan manual:
@@ -56,7 +56,7 @@ Following the Stan manual:
 true trajectory as measured by departure of the Hamiltonian value from its initial
 value.
 
-What does that actually mean? The NUTS sampler moves in steps and is guided by the gradient of the posterior density. With some simplification, the sampler assumes that the posterior density is approximately linear at the current point, i.e. that small change in parameters will result in small change in density. This assumption is approximately correct if the step size is small enough. Lets look at two different step sizes in a one-dimensional example:
+What does that actually mean? Hamiltonian is a function of the posterior density and auxiliary momentum parameters. The auxiliary parameters are well-behaved by construction, so the problem is in the posterior density. Keep in mind that for numerical reasons Stan works with the logarithm of posterior density (also known as: ```log_prob```, ```__lp``` and ```target```).  The NUTS sampler performs several discrete steps per iteration and is guided by the gradient of the density. With some simplification, the sampler assumes that the log density is approximately linear at the current point, i.e. that small change in parameters will result in small change in log-density. This assumption is approximately correct if the step size is small enough. Lets look at two different step sizes in a one-dimensional example:
 
 ```{r setup, echo=FALSE, resutls='hide', message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -73,18 +73,19 @@ intercept <- quadratic_intercept - point_for_tangent ^ 2 - slope * point_for_tan
 special_points <- data.frame(label = c("current", "step = 0.1 - expected", "step = 0.1 - true", "step = 0.4 - expected", "step = 0.4 - true"), x = c(0.1,0.2,0.2,0.5,0.5), density = c(quadratic_intercept - 0.1^2, intercept + slope * 0.2, quadratic_intercept - 0.2^2, intercept + slope * 0.5, quadratic_intercept - 0.5^2))
 
 sample_density %>%
-  ggplot(aes(x=x,y=density)) + geom_line() + geom_abline(slope = slope, intercept = intercept, color = "magenta") + geom_point(data = special_points, aes(color = label, shape = label), size = 4)
+  ggplot(aes(x=x,y=density)) + geom_line() + geom_abline(slope = slope, intercept = intercept, color = "magenta") + geom_point(data = special_points, aes(color = label, shape = label), size = 4) + scale_y_continuous(name ="log(density)")
 ```
-The sampler starts at the red dot, the black line is the density, magenta line is the gradient. When moving 0.1 to the right, the sampler expects the density to decrease linearly (green triangle) and although the actual density decreases more (the green square), the difference is small. But when moving 0.4 to the right the difference between expected (blue cross) and actual (pink crossed square) becomes much larger. It is a large discrepancy of this kind that is signalled as a divergence. During warmup Stan will try to adjust the step size to be small enough for divergences to not occur, but large enough for the sampling to be efficient. But if the parameter space is not well behaved, this might not be possible. Why? Keep on reading, fearless reader.
+The sampler starts at the red dot, the black line is the log-density, magenta line is the gradient. When moving 0.1 to the right, the sampler expects the log-density to decrease linearly (green triangle) and although the actual log-density decreases more (the green square), the difference is small. But when moving 0.4 to the right the difference between expected (blue cross) and actual (pink crossed square) becomes much larger. It is a large discrepancy of a similar kind that is signalled as a divergence. During warmup Stan will try to adjust the step size to be small enough for divergences to not occur, but large enough for the sampling to be efficient. But if the parameter space is not well behaved, this might not be possible. Why? Keep on reading, fearless reader.
 
 ## 2D Examples
 
-Lets try to build some geometric intuition in 2D parameter space. Keep in mind that sampling is about exploring the parameter space proportionally to the associated posterior density - or, in other words - exploring uniformly across the volume between the zero plane and the surface defined by density (probability mass). Imagine the posterior density is a smooth wide hill: 
+Lets try to build some geometric intuition in 2D parameter space. Keep in mind that sampling is about exploring the parameter space proportionally to the associated posterior density - or, in other words - exploring uniformly across the volume between the zero plane and the surface defined by density (probability mass). For simplicity, we will ignore the log transform Stan actually doeas and talk directly about density in the rest of this post. Imagine the posterior density is a smooth wide hill: 
 
 
 ```{r echo=FALSE}
 landscape_plot <- function(d, h = NULL) {
-  ggplot(d, aes(x = x, y = y)) + 
+  data_augmented <- rbind(data.frame(x = d$x, y = d$y), data.frame(x =c(-2.5,2.5), y = c(-7,7)))
+  ggplot(data_augmented, aes(x = x, y = y)) + 
     stat_density_2d(geom = "raster", aes(fill = ..density.., alpha = ..density..), contour = FALSE, h = h) +
     geom_density_2d(color= "black", alpha = 0.7, h = h) + 
     scale_alpha_continuous(range = c(0,1), trans = "sqrt") +
@@ -97,18 +98,22 @@ n_points <- 1000
 smooth_hill <- data.frame( x = rnorm(n_points, 0, 1)) %>% mutate(y = x + rnorm(n_points, 0, 3))
 smooth_hill %>% landscape_plot
 ```
-To explore the hill efficiently, we need to take quite large steps - the chain of samples will represent the posterior well if it can move across the whole posterior in a small number of steps. So average step size of something like 0.5 might be reasonable here. We need to spend a bit more time around the center, but not that much, as there is a lot of volume also close to the edges - it has lower density, but it is a larger area. Now imagine that the posterior is much sharper:
+Stan starts each iteration by moving across the posterior in random direction and then lets the density gradient steer the movement preferrentially to areas with high density. To explore the hill efficiently, we need to take quite large steps in this process - the chain of samples will represent the posterior well if it can move across the whole posterior in a small-ish number of steps (actually at most ```2^max_treedepth``` steps). So average step size of something like 0.1 might be reasonable here as the posterior is approximately linear at this scale. We need to spend a bit more time around the center, but not that much, as there is a lot of volume also close to the edges - it has lower density, but it is a larger area. 
+
+Now imagine that the posterior is much sharper:
 
 ```{r echo=FALSE}
 sharp_mountain <- data.frame( x = rnorm(n_points, 1.5, 0.3)) %>% mutate(y = -x + rnorm(n_points, 5, 0.4))
 sharp_mountain %>% landscape_plot()
 ```
-Now we need much smaller steps to explore safely. Step size of 0.5 won't definitely work as it would frequently result in large, non-linear changes in density and hence divergences. The sampler is however able to adapt and chooses a smaller step size accordingly. But what if the posterior is a combination of both?
+Now we need much smaller steps to explore safely. Step size of 0.1 won't work as the posterior is non-linear on this scale, which will result in divergences. The sampler is however able to adapt and chooses a smaller step size accordingly. Another thing Stan will do is to rescale dimensions where the posterior is narrow. In the example above, posterior is narrower in `y` and thus this dimension will be inflated to roughly match the spread in `x`. Keep in mind that Stan rescales each dimension separately (the posterior is transformed by a diagonal matrix). 
+
+Now what if the posterior is a combination of both a "smooth hill" and a "sharp mountain"?
 
 ```{r echo=FALSE}
 rbind(sharp_mountain, smooth_hill) %>% landscape_plot()
 ```
-The sampler should spend about half the time in the "sharp mountain" and the other half in the "smooth hill", but those regions need different step sizes and the sampler only takes one step size (scaled separetely for each dimension). A chain that adapted to the "smooth hill" region will experience divergences in the "sharp mountain" region, a chain that adapted to the "sharp mountain" will not move efficiently in the "smooth hill" region (which will be signalled as transitions exceeding maximum treedepth). The latter case is however less likely, as the "smooth hill" is larger and chains are more likely to start there. This is why problems of this kind mostly manifest as divergences and less likely as exceeding maximum treedepth.
+The sampler should spend about half the time in the "sharp mountain" and the other half in the "smooth hill", but those regions need different step sizes and the sampler only takes one step size. There is also no way to rescale the dimensions to compensate. A chain that adapted to the "smooth hill" region will experience divergences in the "sharp mountain" region, a chain that adapted to the "sharp mountain" will not move efficiently in the "smooth hill" region (which will be signalled as transitions exceeding maximum treedepth). The latter case is however less likely, as the "smooth hill" is larger and chains are more likely to start there. I *think* that this is why problems of this kind mostly manifest as divergences and less likely as exceeding maximum treedepth.
 
 This is only one of many reasons why multimodal posterior hurts sampling. Multimodality is problematic even if all modes are similar - one of the other problems is that traversing between modes might require much larger step size than exploration within each mode, as in this example:
 
@@ -117,7 +122,7 @@ sharp_mountain_2 <- sharp_mountain %>% mutate(x = x - 3, y = y - 4)
 rbind(sharp_mountain, sharp_mountain_2) %>% landscape_plot(h = 1)
 ```
 
-I bet Stan devs would add tons of other reasons why multimodality is bad for you, but I'll stop here and move to other possible sources of divergences. 
+I bet Stan devs would add tons of other reasons why multimodality is bad for you (it really is), but I'll stop here and move to other possible sources of divergences. 
 
 The posterior geometry may be problematic, even if it is unimodal. A typical example is a funnel, which often arises in multi-level models:
 
@@ -125,7 +130,7 @@ The posterior geometry may be problematic, even if it is unimodal. A typical exa
 funnel <- data.frame(x = abs(rnorm(n_points,0,1)) - 2) %>% mutate(y = rnorm(n_points, 0, x + 2))
 funnel %>% landscape_plot()
 ```
-Here, the sampler should spend a lot of time near the peak (where it needs small steps), but a non-negligible mass is also found in the relatively low-density but large area on the right where a larger step size is required. Similar problems also arise with large regions of constant or almost constant density combined with a single mode.
+Here, the sampler should spend a lot of time near the peak (where it needs small steps), but a non-negligible volume is also found in the relatively low-density but large area on the right where a larger step size is required. Once again, there is no way to rescale each dimension independently to selectively "stretch" the area around the peak. Similar problems also arise with large regions of constant or almost constant density combined with a single mode.
 
 Last, but not least, lets look at tight correlation between variables, which is a different but frequent problem:
 
@@ -133,9 +138,42 @@ Last, but not least, lets look at tight correlation between variables, which is 
 correlated <- data.frame(x = rnorm(n_points, 0, 2)) %>% mutate(y = 2 * x)
 correlated %>% landscape_plot(h = 1)
 ```
-The problem is that if we are moving in the direction of the ridge, we need large step size, but when we move tangentially to that direction, we need small step size. But since Stan optimizes step size for each parameter separately (the step size is defined by a diagonal matrix), it cannot exploit this relationship - big step in ```x``` should be taken if and only if we are also moving in the same direction in ```y```. 
+The problem is that if we are moving in the direction of the ridge, we need large step size, but when we move tangentially to that direction, we need small step size. Once again, Stan is unable to rescale the posterior to compensate as scaling `x` or `y` on its own will increase both width and length of the ridge. 
 
+Things get even more insidious when the relationship between the two variables is not linear:
 
-I don't think I have to emphasize that once we more than two dimensions, there are much more opportunities for problems.
+```{r  echo=FALSE}
+# nonlinear_x <- numeric(n_points)
+# nonlinear_y <- numeric(n_points)
+# for(i in 1:n_points) {
+#   x <- runif(1, -3, 3)
+#   repeat {
+#     y <- runif(1, -5, 5)
+#     if(abs(4.5* sin(x) - y) < 0.2) {
+#       nonlinear_x[i] <- x
+#       nonlinear_y[i] <- y
+#       break
+#     }
+#   }
+#   
+# }
+# data.frame(x = nonlinear_x, y = nonlinear_y) %>% landscape_plot(h = 1)
+
+nonlinear <- data.frame(t = runif(n_points, 4,6.6)) %>% mutate(coeff = 0.01 * exp(t), x = +coeff * sin(t), y = - 5.5 + 2 * coeff * cos(t))
+nonlinear %>% landscape_plot(h = 0.8)
+
+```
+
+Here, a good step size is a function of both location (smaller near the peak) and direction (larger when following the spiral) making this kind of posterior hard to sample.
+
+## Bigger Picture
+
+This has been all pretty vague and folksy. Remeber these examples are there just to provide intuition. To be 100% correct, you need to go to the [NUTS paper](http://www.jmlr.org/papers/volume15/hoffman14a/hoffman14a.pdf) and delve in the math. The math is always correct.
+
+In particular all the above geometries **may** be difficult for NUTS and seeing them in visualisations hints at possible issues, they **may** also be handled just fine. In fact, I wouldn't be surprised if Stan worked with almost anything in two dimensions. Weak linear correlations that form wide ridges are also - in my experience - quite likely to be sampled well, even in higher dimensions. The issues arise when regions of non-negligible density are very narrow in some directions and much wider in others and rescaling each dimension individually won't help. And finally, keep in mind that the posterios we discussed are even more difficult for Gibbs or other older samplers - and Gibbs will not even let you know there was a problem.
+
+# Love Thy Divergences
+
+The amazing thing about divergences is that what is essentially a numerical problem actually signals a wide array of possibly severe modelling problems. Be glad - few algorithms (in any area) have such a clear signal that things went wrong. This is also the reason why you should be suspicious about your results even when only a single divergence had been reported - you don't know what is hiding in the parts of your posterior that are inaccessible with the current step size.
 
 That's all for now. Hope to see you in the future with examples of actual diverging Stan models.
