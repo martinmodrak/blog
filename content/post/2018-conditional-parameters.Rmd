@@ -1,0 +1,145 @@
+---
+title: "Optional Parameters/Data in Stan"
+date: 2018-04-24
+draft: true
+tags: ["R","Stan","Modelling"]
+---
+
+Sometimes you are developing a model that has multiple variants: maybe you want to consider several different link functions somewhere deep in your model, or you want to switch between estimating a quantity and getting it as data or something completely different. In these cases, you might have wanted to use optional parameters and/or data that apply only to some variants of your model. Sadly, Stan does not support this feature directly, but you can implement it yourself with just a bit of additional code. In this post I will show how.
+
+## The Base Model
+
+Let's start with a very simple model: just estimating the mean and standard deviation of a normal distribution:
+
+```{r setup, message=FALSE, warning=FALSE}
+library(rstan)
+library(knitr)
+library(tidyverse)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+set.seed(3145678)
+```
+
+```{r cache = TRUE, results="hide"}
+model_fixed_code <- "
+data {
+  int N;
+  vector[N] X;
+}
+
+parameters {
+  real mu;
+  real<lower=0> sigma; 
+}
+
+model {
+  X ~ normal(mu, sigma);
+
+  //And some priors
+  mu ~ normal(0, 10);
+  sigma ~ student_t(3, 0, 1);
+}
+
+"
+
+model_fixed <- stan_model(model_code = model_fixed_code)
+```
+
+And let's simulate some data and see that it fits:
+
+```{r cache=TRUE}
+mu_true = 8
+sigma_true = 2
+N = 10
+X <- rnorm(N, mean = mu_true, sd = sigma_true)
+
+data_fixed <- list(N = N, X = X)
+fit_fixed <- sampling(model_fixed, data = data_fixed, iter = 500)
+summary(fit_fixed, probs = c(0.1, 0.9))$summary %>% kable()
+```
+
+## Now With Optional Parameters
+
+Let's say we now want to handle the case where the standard deviation is known. Obviously we could write a new model. But what if the full model has several hundred lines and the only thing we want to change is to let the user specify the known standard deviation? We can take advantage of the fact that Stan allows zero-sized arrays/vectors and features the *ternary operator* `?`. The ternary operator has the syntax `(condition) ? (true value) : (false value)` and works like an ``if - else `` statement, but within an expression. The last piece of the puzzle is that Stan allows size of data and parameter arrays to depend on arbitrary expressions computed from data. The model that can handle both known and unknown standard deviation follows:
+
+```{r cache = TRUE, results="hide"}
+model_optional_code <- "
+data {
+  int N;
+  vector[N] X;
+
+  //Just a verbose way to specify boolean variable
+  int<lower = 0, upper = 1> sigma_known; 
+
+  //sigma_data is size 0 if sigma_known is FALSE
+  real<lower=0> sigma_data[sigma_known ? 1 : 0]; 
+}
+
+parameters {
+  real mu;
+
+  //sigma is size 0 if sigma_known is TRUE
+  real<lower=0> sigma_param[sigma_known ? 0 : 1]; 
+}
+
+transformed parameters {
+  real<lower=0> sigma;
+  if (sigma_known) {
+    sigma = sigma_data[1];
+  } else {
+    sigma = sigma_param[1];
+  }
+}
+
+model {
+  X ~ normal(mu, sigma);
+
+  //And some priors
+  mu ~ normal(0, 10);
+  if (!sigma_known) {
+    sigma_param ~ student_t(3, 0, 1);
+  }
+}
+
+"
+
+model_optional <- stan_model(model_code = model_optional_code)
+```
+
+We had to add some biolerplate code, but now we don't have to maintain two separate models. This trick is also sometimes useful if you want to test multiple variants in development. As the model compiles only once and then you can test the two variants while modifying other parts of your code and reduce time waiting for compilation.
+
+Just to make sure the model works and see how to correctly specify the data, let's fit it assuming the standard deviation is to be estimated:
+
+```{r cache=TRUE}
+data_optional <- list(
+  N = N,
+  X = X,
+  sigma_known = 0,
+  sigma_data = numeric(0) #This produces an array of size 0
+)
+
+fit_optional <- sampling(model_optional, 
+                         data = data_optional, 
+                         iter = 500, pars = c("mu","sigma"))
+summary(fit_optional, probs = c(0.1, 0.9))$summary %>% kable()
+```
+
+And now let's run the model and give it the correct standard deviation:
+
+```{r cache=TRUE}
+data_optional_sigma_known <- list(
+  N = N,
+  X = X,
+  sigma_known = 1,
+  sigma_data = array(sigma_true, 1) 
+  #The array conversion is necessary, otherwise Stan complains about dimensions
+)
+
+fit_optional_sigma_known <- sampling(model_optional, 
+                                     data = data_optional_sigma_known, 
+                                     iter = 500, pars = c("mu","sigma"))
+summary(fit_optional_sigma_known, probs = c(0.1, 0.9))$summary %>% kable()
+
+```
+
+And that's about all I have to say about this topic.

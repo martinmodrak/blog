@@ -1,6 +1,7 @@
 ---
 title: "Checking Stan model correctnes with Cook, Gelman and Rubin"
 date: 2018-03-01
+tags: ["R","Stan"]
 draft: true
 ---
 

@@ -1,6 +1,7 @@
 ---
 title: "Launch Shiny App Without Blocking the Session"
 date: 2018-02-13
+tags: ["R","Stan","Shiny"]
 ---
 
 This is a neat trick I found on [Tyler Morgan-Wall's Twitter](https://twitter.com/tylermorganwall/status/962074911949840387) and is originally attributed to [Joe Cheng](https://twitter.com/jcheng). You can run any Shiny app without blocking the session. My helper function to run ShinyStan without blocking is below:

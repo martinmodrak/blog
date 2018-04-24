@@ -1,6 +1,7 @@
 ---
-title: "ODE model of gene regulation (for StanCon)"
+title: "ODE Model of Gene Regulation (for StanCon)"
 date: 2018-04-18
+tags: ["R","Stan","Modelling"]
 ---
 
 I have just finished my submission to StanCon Helsinki 2018 which deals with my ongoing work on Bayesian modelling for gene regulation. I submitted late, because I procrastinated a lot on it and I recently have terrible time management in general. So we will se if it will even get considered.

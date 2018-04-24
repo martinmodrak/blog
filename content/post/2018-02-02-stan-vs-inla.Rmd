@@ -1,5 +1,5 @@
 ---
-title: "A gentle Stan vs. INLA comparison"
+title: "A Gentle Stan vs. INLA Comparison"
 date: 2018-02-02
 output: html_notebook
 tags: ["R","Stan","INLA"]
@@ -13,7 +13,7 @@ Pleas let me know (via an [issue on GitHub](https://github.com/martinmodrak/blog
 
 Here are the original numbers from Kathryn's blog:
 
-```{r echo=FALSE,results='asis'}
+```{r echo=FALSE,results='asis', warning = FALSE}
 library(knitr)
 kathryn_results = data.frame(N = c(100, 500, 5000, 25000, 100000), kathryn_rjags = c("30.394","142.532","1714.468","8610.32","got bored after 6 hours"), kathryn_rinla = c(0.383,1.243,5.768,30.077,166.819))
 kable(kathryn_results)
@@ -240,7 +240,7 @@ if(run_inla) {
 ###Checking inferences
 Here we see side-by-side comparisons of the inferences and they seem pretty comparable between Stan and Inla:
 
-```{r results='asis'}
+```{r results='asis', warning=FALSE}
 for(N_to_show in N_values) {
   print(kable(stan_summary %>% filter(N == N_to_show) %>% 
                 select(c("parameter","mean","sd")), 

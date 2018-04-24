@@ -1,0 +1,261 @@
+---
+title: "Optional Parameters/Data in Stan"
+date: 2018-04-24
+draft: true
+tags: ["R","Stan","Modelling"]
+---
+
+
+
+<p>Sometimes you are developing a model that has multiple variants: maybe you want to consider several different link functions somewhere deep in your model, or you want to switch between estimating a quantity and getting it as data or something completely different. In these cases, you might have wanted to use optional parameters and/or data that apply only to some variants of your model. Sadly, Stan does not support this feature directly, but you can implement it yourself with just a bit of additional code. In this post I will show how.</p>
+<div id="the-base-model" class="section level2">
+<h2>The Base Model</h2>
+<p>Let’s start with a very simple model: just estimating the mean and standard deviation of a normal distribution:</p>
+<pre class="r"><code>library(rstan)
+library(knitr)
+library(tidyverse)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+set.seed(3145678)</code></pre>
+<pre class="r"><code>model_fixed_code &lt;- &quot;
+data {
+  int N;
+  vector[N] X;
+}
+
+parameters {
+  real mu;
+  real&lt;lower=0&gt; sigma; 
+}
+
+model {
+  X ~ normal(mu, sigma);
+
+  //And some priors
+  mu ~ normal(0, 10);
+  sigma ~ student_t(3, 0, 1);
+}
+
+&quot;
+
+model_fixed &lt;- stan_model(model_code = model_fixed_code)</code></pre>
+<p>And let’s simulate some data and see that it fits:</p>
+<pre class="r"><code>mu_true = 8
+sigma_true = 2
+N = 10
+X &lt;- rnorm(N, mean = mu_true, sd = sigma_true)
+
+data_fixed &lt;- list(N = N, X = X)
+fit_fixed &lt;- sampling(model_fixed, data = data_fixed, iter = 500)
+summary(fit_fixed, probs = c(0.1, 0.9))$summary %&gt;% kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th></th>
+<th align="right">mean</th>
+<th align="right">se_mean</th>
+<th align="right">sd</th>
+<th align="right">10%</th>
+<th align="right">90%</th>
+<th align="right">n_eff</th>
+<th align="right">Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>mu</td>
+<td align="right">7.855031</td>
+<td align="right">0.0256139</td>
+<td align="right">0.5632183</td>
+<td align="right">7.162485</td>
+<td align="right">8.548415</td>
+<td align="right">483.5059</td>
+<td align="right">1.007501</td>
+</tr>
+<tr class="even">
+<td>sigma</td>
+<td align="right">1.774158</td>
+<td align="right">0.0206974</td>
+<td align="right">0.4400573</td>
+<td align="right">1.302616</td>
+<td align="right">2.350727</td>
+<td align="right">452.0508</td>
+<td align="right">1.003409</td>
+</tr>
+<tr class="odd">
+<td>lp__</td>
+<td align="right">-12.103350</td>
+<td align="right">0.0555738</td>
+<td align="right">1.1132479</td>
+<td align="right">-13.664610</td>
+<td align="right">-11.091775</td>
+<td align="right">401.2768</td>
+<td align="right">1.004955</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="now-with-optional-parameters" class="section level2">
+<h2>Now With Optional Parameters</h2>
+<p>Let’s say we now want to handle the case where the standard deviation is known. Obviously we could write a new model. But what if the full model has several hundred lines and the only thing we want to change is to let the user specify the known standard deviation? We can take advantage of the fact that Stan allows zero-sized arrays/vectors and features the <em>ternary operator</em> <code>?</code>. The ternary operator has the syntax <code>(condition) ? (true value) : (false value)</code> and works like an <code>if - else</code> statement, but within an expression. The last piece of the puzzle is that Stan allows size of data and parameter arrays to depend on arbitrary expressions computed from data. The model that can handle both known and unknown standard deviation follows:</p>
+<pre class="r"><code>model_optional_code &lt;- &quot;
+data {
+  int N;
+  vector[N] X;
+
+  //Just a verbose way to specify boolean variable
+  int&lt;lower = 0, upper = 1&gt; sigma_known; 
+
+  //sigma_data is size 0 if sigma_known is FALSE
+  real&lt;lower=0&gt; sigma_data[sigma_known ? 1 : 0]; 
+}
+
+parameters {
+  real mu;
+
+  //sigma is size 0 if sigma_known is TRUE
+  real&lt;lower=0&gt; sigma_param[sigma_known ? 0 : 1]; 
+}
+
+transformed parameters {
+  real&lt;lower=0&gt; sigma;
+  if (sigma_known) {
+    sigma = sigma_data[1];
+  } else {
+    sigma = sigma_param[1];
+  }
+}
+
+model {
+  X ~ normal(mu, sigma);
+
+  //And some priors
+  mu ~ normal(0, 10);
+  if (!sigma_known) {
+    sigma_param ~ student_t(3, 0, 1);
+  }
+}
+
+&quot;
+
+model_optional &lt;- stan_model(model_code = model_optional_code)</code></pre>
+<p>We had to add some biolerplate code, but now we don’t have to maintain two separate models. This trick is also sometimes useful if you want to test multiple variants in development. As the model compiles only once and then you can test the two variants while modifying other parts of your code and reduce time waiting for compilation.</p>
+<p>Just to make sure the model works and see how to correctly specify the data, let’s fit it assuming the standard deviation is to be estimated:</p>
+<pre class="r"><code>data_optional &lt;- list(
+  N = N,
+  X = X,
+  sigma_known = 0,
+  sigma_data = numeric(0) #This produces an array of size 0
+)
+
+fit_optional &lt;- sampling(model_optional, 
+                         data = data_optional, 
+                         iter = 500, pars = c(&quot;mu&quot;,&quot;sigma&quot;))
+summary(fit_optional, probs = c(0.1, 0.9))$summary %&gt;% kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th></th>
+<th align="right">mean</th>
+<th align="right">se_mean</th>
+<th align="right">sd</th>
+<th align="right">10%</th>
+<th align="right">90%</th>
+<th align="right">n_eff</th>
+<th align="right">Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>mu</td>
+<td align="right">7.854036</td>
+<td align="right">0.0198265</td>
+<td align="right">0.5440900</td>
+<td align="right">7.181837</td>
+<td align="right">8.531780</td>
+<td align="right">753.0924</td>
+<td align="right">0.9981102</td>
+</tr>
+<tr class="even">
+<td>sigma</td>
+<td align="right">1.730077</td>
+<td align="right">0.0152808</td>
+<td align="right">0.3918781</td>
+<td align="right">1.308565</td>
+<td align="right">2.270505</td>
+<td align="right">657.6701</td>
+<td align="right">0.9989029</td>
+</tr>
+<tr class="odd">
+<td>lp__</td>
+<td align="right">-11.992770</td>
+<td align="right">0.0503044</td>
+<td align="right">0.9811551</td>
+<td align="right">-13.383729</td>
+<td align="right">-11.089657</td>
+<td align="right">380.4199</td>
+<td align="right">1.0016842</td>
+</tr>
+</tbody>
+</table>
+<p>And now let’s run the model and give it the correct standard deviation:</p>
+<pre class="r"><code>data_optional_sigma_known &lt;- list(
+  N = N,
+  X = X,
+  sigma_known = 1,
+  sigma_data = array(sigma_true, 1) 
+  #The array conversion is necessary, otherwise Stan complains about dimensions
+)
+
+fit_optional_sigma_known &lt;- sampling(model_optional, 
+                                     data = data_optional_sigma_known, 
+                                     iter = 500, pars = c(&quot;mu&quot;,&quot;sigma&quot;))
+summary(fit_optional_sigma_known, probs = c(0.1, 0.9))$summary %&gt;% kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th></th>
+<th align="right">mean</th>
+<th align="right">se_mean</th>
+<th align="right">sd</th>
+<th align="right">10%</th>
+<th align="right">90%</th>
+<th align="right">n_eff</th>
+<th align="right">Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>mu</td>
+<td align="right">7.808058</td>
+<td align="right">0.0292710</td>
+<td align="right">0.6273565</td>
+<td align="right">7.017766</td>
+<td align="right">8.622762</td>
+<td align="right">459.3600</td>
+<td align="right">1.006164</td>
+</tr>
+<tr class="even">
+<td>sigma</td>
+<td align="right">2.000000</td>
+<td align="right">0.0000000</td>
+<td align="right">0.0000000</td>
+<td align="right">2.000000</td>
+<td align="right">2.000000</td>
+<td align="right">1000.0000</td>
+<td align="right">NaN</td>
+</tr>
+<tr class="odd">
+<td>lp__</td>
+<td align="right">-11.072234</td>
+<td align="right">0.0321233</td>
+<td align="right">0.6750295</td>
+<td align="right">-11.917321</td>
+<td align="right">-10.585280</td>
+<td align="right">441.5753</td>
+<td align="right">1.002187</td>
+</tr>
+</tbody>
+</table>
+<p>And that’s about all I have to say about this topic.</p>
+</div>

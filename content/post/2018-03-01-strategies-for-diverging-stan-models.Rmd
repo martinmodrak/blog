@@ -1,6 +1,7 @@
 ---
 title: "Taming Divergences in Stan Models"
 date: 2018-02-19
+tags: ["R","Stan","Divergences"]
 ---
 
 Although my time with the [Stan language](http://mc-stan.org) has been enjoyable, there is one thing that is not fun when modelling with Stan. And it is the dreaded warning message:
@@ -68,7 +69,7 @@ library(tidyverse)
 set.seed(20180206)
 ```
 
-```{r echo=FALSE}
+```{r echo=FALSE, warning = FALSE}
 quadratic_intercept <- 0.4
 sample_density <- data.frame(x = seq(0,0.55,length.out = 100)) %>% mutate(density = quadratic_intercept - x^2)
 point_for_tangent <- 0.1
