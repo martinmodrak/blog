@@ -59,7 +59,9 @@ summary(fit_fixed, probs = c(0.1, 0.9))$summary %>% kable()
 
 ## Now With Optional Parameters
 
-Let's say we now want to handle the case where the standard deviation is known. Obviously we could write a new model. But what if the full model has several hundred lines and the only thing we want to change is to let the user specify the known standard deviation? We can take advantage of the fact that Stan allows zero-sized arrays/vectors and features the *ternary operator* `?`. The ternary operator has the syntax `(condition) ? (true value) : (false value)` and works like an ``if - else `` statement, but within an expression. The last piece of the puzzle is that Stan allows size of data and parameter arrays to depend on arbitrary expressions computed from data. The model that can handle both known and unknown standard deviation follows:
+Let's say we now want to handle the case where the standard deviation is known. Obviously we could write a new model. But what if the full model has several hundred lines and the only thing we want to change is to let the user specify the known standard deviation? The simplest solution is to just have all parameters/data that are needed in any of the variants lying around and use ```if``` conditions in the model block to ignore some of them, but that is a bit unsatisfactory (and also those unused parameters may in some cases hinder sampling).
+
+For a better solution, we can take advantage of the fact that Stan allows zero-sized arrays/vectors and features the *ternary operator* `?`. The ternary operator has the syntax `(condition) ? (true value) : (false value)` and works like an ``if - else `` statement, but within an expression. The last piece of the puzzle is that Stan allows size of data and parameter arrays to depend on arbitrary expressions computed from data. The model that can handle both known and unknown standard deviation follows:
 
 ```{r cache = TRUE, results="hide"}
 model_optional_code <- "
