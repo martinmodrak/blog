@@ -141,4 +141,44 @@ summary(fit_optional_sigma_known, probs = c(0.1, 0.9))$summary %>% kable()
 
 ```
 
-And that's about all I have to say about this topic.
+## Extending
+
+Obviously this method lets you do all sorts of more complicated things, in particular:
+
+ * When the optional parameter is a vector you can have something like 
+ 
+ ```vector[sigma_known ? 0 : n_sigma] sigma;```
+ 
+ * You can have more than two variants to choose from and then use something akin to
+ 
+ ```real param[varaint == 5 ? 0 : 1];```
+ 
+ * If your conditions become more complex you can always put them into a user-defined function (for optional data) or ```transformed data``` block (for optional parameters) as in: 
+ 
+  
+```
+functions {
+  int compute_whatever_size(int X, int Y, int Z) {
+        //do stuff
+  }
+}
+
+data {
+  ...
+  real whatever[compute_whatever_size(X,Y,Z)];
+  real<lower = 0> whatever_sigma[compute_whatever_size(X,Y,Z)];
+}
+
+transformed data {
+  int carebear_size;
+  
+  //do stuff
+  carebear_size = magic_result;
+}
+
+parameters {
+  vector[carebear_size] carebear;
+  matrix[carebear_size,carebear_size] spatial_carebear;
+}
+
+```

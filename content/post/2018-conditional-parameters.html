@@ -256,5 +256,43 @@ summary(fit_optional_sigma_known, probs = c(0.1, 0.9))$summary %&gt;% kable()</c
 </tr>
 </tbody>
 </table>
-<p>And that’s about all I have to say about this topic.</p>
+</div>
+<div id="extending" class="section level2">
+<h2>Extending</h2>
+<p>Obviously this method lets you do all sorts of more complicated things, in particular:</p>
+<ul>
+<li>When the optional parameter is a vector you can have something like</li>
+</ul>
+<p><code>vector[sigma_known ? 0 : n_sigma] sigma;</code></p>
+<ul>
+<li>You can have more than two variants to choose from and then use something akin to</li>
+</ul>
+<p><code>real param[varaint == 5 ? 0 : 1];</code></p>
+<ul>
+<li>If your conditions become more complex you can always put them into a user-defined function (for optional data) or <code>transformed data</code> block (for optional parameters) as in:</li>
+</ul>
+<pre><code>functions {
+  int compute_whatever_size(int X, int Y, int Z) {
+        //do stuff
+  }
+}
+
+data {
+  ...
+  real whatever[compute_whatever_size(X,Y,Z)];
+  real&lt;lower = 0&gt; whatever_sigma[compute_whatever_size(X,Y,Z)];
+}
+
+transformed data {
+  int carebear_size;
+  
+  //do stuff
+  carebear_size = magic_result;
+}
+
+parameters {
+  vector[carebear_size] carebear;
+  matrix[carebear_size,carebear_size] spatial_carebear;
+}
+</code></pre>
 </div>
