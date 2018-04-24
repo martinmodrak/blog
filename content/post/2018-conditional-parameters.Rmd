@@ -1,7 +1,6 @@
 ---
 title: "Optional Parameters/Data in Stan"
 date: 2018-04-24
-draft: true
 tags: ["R","Stan","Modelling"]
 ---
 
