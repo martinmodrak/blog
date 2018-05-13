@@ -4,18 +4,6 @@ date: 2018-05-14
 draft: true
 ---
 
-
-```{r setup}
-library(tidyverse)
-library(rstan)
-library(knitr)
-library(rgl)
-knit_hooks$set(rgl = hook_rgl)
-
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-```
-
 *This is a second post in my series on taming divergences in Stan models, see the [first post in the series](/2018/02/19/taming-divergences-in-stan-models/) for a general introduction. *
 
 **Standard caveat:** *I am not an expert on Stan, I consider myself just an advanced user who likes to explain things. Please point out any errors, things that contradict your experience or anything else you do not trust.*
@@ -34,6 +22,19 @@ We will start with some weakly identified non-linear regression models and move 
 
 A frequent source of fitting issues due to non-identifiability are mixture models. There is an excellent
 [case study for mixture models](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html) by Michael Betancourt and I have nothing to add to this topic, so those are not covered.
+
+Well, let's get our hands dirty!
+
+```{r setup, results='hide',message=FALSE,warning=FALSE}
+library(tidyverse)
+library(rstan)
+library(knitr)
+library(rgl)
+knit_hooks$set(webgl = hook_webgl)
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
 
 
 # A weakly-identified model that (mostly) works
@@ -74,7 +75,7 @@ model_linear <- stan_model(model_code = stan_code_linear)
 
 When wide array of $x$ values is available, this model works without any trouble. But what happens when all $x_i \in  \{0,1\}$? In this case the likelihood cannot distinguish between the contribution of $\beta_1$ and $\beta_2$. Let's simulate some data and have a look at the [pairs](https://www.rdocumentation.org/packages/rstan/versions/2.17.3/topics/pairs.stanfit) plot:
 
-```{r} 
+```{r cache=TRUE} 
 set.seed(20180512)
 
 sigma = 1 
@@ -93,8 +94,8 @@ pairs(fit_linear, pars = "beta")
 
 While the result is not very useful, the sampler worked well! We gained little information about each $beta$ individually (their range spans alomost all of the prior), but their sum is tightly constrained as witnessed by the strong negative correlation. But what if we increase `prior_width` to make the prior resemble a flat prior?
 
-```{r}
-set.seed(2164532465)
+```{r cache=TRUE}
+set.seed(21645465)
 
 data_linear2 <- data_linear
 data_linear2$prior_width = 100
@@ -146,7 +147,7 @@ model_sigmoid <- stan_model(model_code = stan_code_sigmoid)
 
 Now lets fit the model to simulated datasets with the exact same true parameter valuess $w = b = 1$, but different values of the independent variable $x$, in one case, $x$ is drawn from $N(0,2)$, in the other one, it is drawn from $N(0,5)$.
 
-```{r}
+```{r cache=TRUE}
 set.seed(214575878)
 
 simulate_sigmoid <- function(x) {
@@ -230,7 +231,7 @@ model_sigmoid2 <- stan_model(model_code = stan_code_sigmoid2)
 ```
 This time we will simulate two datasets with the same $x$ and $k = b = 1$, but one will have $w = 1$ while the other one will feature $w = 0$.
 
-```{r}
+```{r cache=TRUE}
 set.seed(98321456)
 
 simulate_sigmoid2 <- function(x, w) {
@@ -265,14 +266,17 @@ As has become the habit in this post, the model diverges for the second dataset.
 pairs(fit_sigmoid2_ok, pars = "energy__", include = FALSE)
 pairs(fit_sigmoid2_divergent, pars = "energy__", include = FALSE)
 ```
-While the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`). Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
+While the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
 
-```{r, rgl = TRUE}
+```{r, webgl=TRUE}
 samples <- rstan::extract(fit_sigmoid2_divergent)
-plot3d(samples$w, samples$k, samples$lp__)
+open3d()
+rgl::plot3d(samples$w, samples$k, samples$lp__, xlab = "w", ylab = "k", zlab = "lp__")
 ```
 
-The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with much higher `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ and $b$ become very closely tied, but almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible, but for the true posterior, it should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences when traversing the ridge at $w = 0$.
+The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ and $b$ become very closely tied, but almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible, but for the true posterior, it should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences when traversing the ridge at $w = 0$.
+
+When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. These kind of issues however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available, providing that the data sometimes represent a special case and sometimes require the full model. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma))$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)!
 
 # Neural network: When ordering is not enough
 
