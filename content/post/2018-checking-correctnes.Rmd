@@ -1,5 +1,5 @@
 ---
-title: "Checking Stan model correctnes with Cook, Gelman and Rubin"
+title: "Checking  model correctnes with SBC"
 date: 2018-03-01
 tags: ["R","Stan"]
 draft: true

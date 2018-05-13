@@ -1,0 +1,290 @@
+---
+title: "Identifying non-identifiability"
+date: 2018-05-14
+draft: true
+---
+
+
+```{r setup}
+library(tidyverse)
+library(rstan)
+library(knitr)
+library(rgl)
+knit_hooks$set(rgl = hook_rgl)
+
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+*This is a second post in my series on taming divergences in Stan models, see the [first post in the series](/2018/02/19/taming-divergences-in-stan-models/) for a general introduction. *
+
+**Standard caveat:** *I am not an expert on Stan, I consider myself just an advanced user who likes to explain things. Please point out any errors, things that contradict your experience or anything else you do not trust.*
+
+# What is "non-identifiability"
+
+In a strict sense, it means that there is not a unique local maximum of the posterior density - either because there are multiple separate maxima or because there is ridge/plateau where a set of points has the same posterior density.
+
+On the Stan forums the term seems to be used in a bit broader sense and also covers cases where the maximum of the posterior density is in a region that is approximately flat. This often happens when the posterior is dominated by the prior and the likelihood provides little information about the parameters. If this is the case, it is sometimes said that the model is *weakly identified*. A weakly identified model may become non-identified in the strict sense if a prior is not specified for all parameters. This is just another reason to specify proper priors for everything.
+
+# Scope
+
+In this post I will show a few different types of issues that result from limited identifiability. I will also try to show how to spot these problems in various visualisations. Remember that instead of creating the plots in code as we do here, you can use [ShinyStan](http://mc-stan.org/users/interfaces/shinystan) to explore many visualisations interactively. 
+
+We will start with some weakly identified non-linear regression models and move toward models that are hopelessly multimodal (have multiple local maxima of posterior density), including a small neural network and Gaussian process with a Berkson-style error. I will focus on models that don't have any obvious error (like ommitted prior), although such errors can lead to non-identifiability. A recurring theme in this post is that identifiability may depend on the actual data as well as the model, keep that in mind when modelling!
+
+A frequent source of fitting issues due to non-identifiability are mixture models. There is an excellent
+[case study for mixture models](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html) by Michael Betancourt and I have nothing to add to this topic, so those are not covered.
+
+
+# A weakly-identified model that (mostly) works
+
+First, let's start with a model I thought would have problems but that ended up mostly OK. The model is a simple regression with a quadratic term:
+
+$$
+\begin{align}
+\mu_i &= \beta_1 x_i + \beta_2 x_i^2 \\
+y_i &\sim N(\mu_i, \sigma)
+\end{align}
+$$
+and here is the Stan code:
+
+```{r cache=TRUE, results='hide'} 
+stan_code_linear <- " 
+data { 
+  int N; 
+  vector[N] y; 
+  vector[N] x; 
+  real<lower=0> sigma; 
+  real<lower=0> prior_width;
+} 
+ 
+parameters { 
+  real beta[2]; 
+} 
+ 
+model { 
+  y ~ normal(beta[1] * x + beta[2] * square(x), sigma); 
+  sigma ~ normal(0,1); 
+  beta ~ normal(0,prior_width); 
+} 
+" 
+ 
+model_linear <- stan_model(model_code = stan_code_linear) 
+``` 
+
+When wide array of $x$ values is available, this model works without any trouble. But what happens when all $x_i \in  \{0,1\}$? In this case the likelihood cannot distinguish between the contribution of $\beta_1$ and $\beta_2$. Let's simulate some data and have a look at the [pairs](https://www.rdocumentation.org/packages/rstan/versions/2.17.3/topics/pairs.stanfit) plot:
+
+```{r} 
+set.seed(20180512)
+
+sigma = 1 
+x = rep(c(0,1), times = 10)
+data_linear <- list( 
+  N = length(x), 
+  x = x, 
+  y = rnorm(length(x), x + x ^ 2, sigma),
+  sigma = sigma,
+  prior_width = 10
+) 
+ 
+fit_linear <- sampling(model_linear, data = data_linear) 
+pairs(fit_linear, pars = "beta")
+``` 
+
+While the result is not very useful, the sampler worked well! We gained little information about each $beta$ individually (their range spans alomost all of the prior), but their sum is tightly constrained as witnessed by the strong negative correlation. But what if we increase `prior_width` to make the prior resemble a flat prior?
+
+```{r}
+set.seed(2164532465)
+
+data_linear2 <- data_linear
+data_linear2$prior_width = 100
+fit_linear2 <- sampling(model_linear, data = data_linear2) 
+pairs(fit_linear2, pars = "beta")
+```
+
+What happens is that the ridge in the posterior becomes too long and the sampler cannot traverse it efficiently, resulting in transitions that exceed the maximum treedepth. The root of the problem is that the sampler has to choose a step size that is shorter than the width of the ridge to not diverge when moving tangentially to the ridge direction. With such a small step size, the sampler cannot move across the length of the ridge in one iteration. Still, the results should be unbiased and if we manage to get a reasonable `n_eff` (which we do), there is no reason to worry.
+
+While this particular model works well unless we set the prior too wide, such linear correlations in the pairs plot are a bad sign and you should try to avoid them as they can produce problems when interacting with other components of a larger model. It might make sense to reparametrize using the sum or ratio of the variables in question.
+
+# A weakly-identified model leading to divergences
+
+Let's move to a model where the non-identifiability actually wreaks havoc. Once again, the model works for some data, but breaks for others even if all model assumptions do hold. The model tries to determine parameters of a sigmoid function that is observed noisily:
+
+$$
+\begin{align}
+y_{true} &= \frac{1}{1 + e^{-wx-b}} \\
+y &\sim N(y_{true},\sigma)
+\end{align}
+$$
+Here $w$ and $b$ are the only parameters of the model, the corresponding Stan code is below:
+
+```{r cache=TRUE, results = 'hide'}
+stan_code_sigmoid <- "
+data {
+  int N;
+  vector[N] y;
+  vector[N] x;
+  real<lower=0> prior_width;
+  real<lower=0> sigma;
+}
+
+parameters {
+  real w;
+  real b;
+}
+
+model {
+  vector[N] y_true = inv_logit(w * x + b);
+  y ~ normal(y_true, sigma);
+  w ~ normal(0,prior_width);
+  b ~ normal(0,prior_width);
+}
+"
+
+model_sigmoid <- stan_model(model_code = stan_code_sigmoid)
+```
+
+Now lets fit the model to simulated datasets with the exact same true parameter valuess $w = b = 1$, but different values of the independent variable $x$, in one case, $x$ is drawn from $N(0,2)$, in the other one, it is drawn from $N(0,5)$.
+
+```{r}
+set.seed(214575878)
+
+simulate_sigmoid <- function(x) {
+  sigma = 0.1
+  w = 1
+  b = 1
+  N = length(x)
+  y_true = 1 / (1 + exp(-w*x-b))
+  prior_width = 10
+  
+  list(
+    N = N,
+    x = x,
+    y = rnorm(N, y_true, sigma),
+    prior_width = prior_width,
+    sigma = sigma
+  )
+}
+
+data_sigmoid_ok <- simulate_sigmoid(rnorm(20, 0, 2))
+fit_sigmoid_ok <- sampling(model_sigmoid, data = data_sigmoid_ok)
+print(fit_sigmoid_ok)
+
+data_sigmoid_divergent <-  simulate_sigmoid(rnorm(20, 5, 2)) # <- the mean of the distribution is altered!
+fit_sigmoid_divergent <- sampling(model_sigmoid, data = data_sigmoid_divergent)
+print(fit_sigmoid_divergent)
+```
+
+Now, for the first dataset, the model converges and recovers parameters correctly. For the second one there is a huge number of divergences and the parameters are largely uncertain and overestimated. So once again, the model is identifiable in principle, but the extreme data introduce problems. 
+
+Let's try to visualise the posteriors - luckily we only have two parameters, so it is easy to see everything at once!
+
+```{r}
+pairs(fit_sigmoid_ok, pars = c("w","b"))
+pairs(fit_sigmoid_divergent, pars = c("w","b"))
+```
+
+The issue is that for the second dataset, we sampled $x$ towards the tail of the sigmoid and almost all $y$ are thus close to 1, giving us little information about the parameters. However, the model strictly enforces that $w x + b > 0$.
+This creates a large area of the posterior where the value of $w$ and $b$ does not matter much (requiring a large step size to traverse) and a thin sharp boundary around $wx + b \simeq 0$ where a smaller step size is required to traverse safely. Transitions crossing the boundary often diverge due to large step size, leading to overexploration of the flat area and bias.
+
+This is, in my experience, one of the ways that weak identifiability may hurt sampling - the model maybe weakly identified only for a subset of the parameter space while there is another area where the likelihood has a huge contribution and this may require different step size for the sampler. 
+
+
+# A model with non-identified special case
+
+We can make the above model even more problematic by introducing a parameter $k$ to generalize the sigmoid a bit more:
+
+$$
+\begin{align}
+y_{true} &= \frac{k}{1 + e^{-wx-b}} \\
+y &\sim N(y_{true},\sigma)
+\end{align}
+$$
+giving us the following Stan code:
+
+```{r cache=TRUE, results ='hide'}
+stan_code_sigmoid2 <- "
+data {
+  int N;
+  vector[N] y;
+  vector[N] x;
+  real<lower=0> prior_width;
+  real<lower=0> sigma;
+}
+
+parameters {
+  real k;
+  real w;
+  real b;
+}
+
+model {
+  vector[N] y_true = k * inv_logit(w * x + b);
+  y ~ normal(y_true, sigma);
+  w ~ normal(0,prior_width);
+  b ~ normal(0,prior_width);
+}
+"
+
+model_sigmoid2 <- stan_model(model_code = stan_code_sigmoid2)
+```
+This time we will simulate two datasets with the same $x$ and $k = b = 1$, but one will have $w = 1$ while the other one will feature $w = 0$.
+
+```{r}
+set.seed(98321456)
+
+simulate_sigmoid2 <- function(x, w) {
+  sigma = 0.1
+  k = 1
+  b = 1
+  N = length(x)
+  prior_width = 10
+  y_true = k / (1 + exp(-w*x-b))
+  
+  list(
+    N = N,
+    x = x,
+    y = rnorm(N, y_true, sigma),
+    prior_width = prior_width,
+    sigma = sigma
+  )
+}
+
+data_sigmoid2_ok <- simulate_sigmoid2(rnorm(20, 0, 2), 1)
+fit_sigmoid2_ok <- sampling(model_sigmoid2, data = data_sigmoid2_ok)
+print(fit_sigmoid2_ok)
+
+data_sigmoid2_divergent <-  simulate_sigmoid2(rnorm(20, 0, 2), 0)
+fit_sigmoid2_divergent <- sampling(model_sigmoid2, data = data_sigmoid2_divergent)
+print(fit_sigmoid2_divergent)
+```
+
+As has become the habit in this post, the model diverges for the second dataset. Note also that the parameter estimates for $k$ and $b$ are way off. (remember: even a few divergent transitions indicate sampling problems). Let's have a look at the pair plots:
+
+```{r}
+pairs(fit_sigmoid2_ok, pars = "energy__", include = FALSE)
+pairs(fit_sigmoid2_divergent, pars = "energy__", include = FALSE)
+```
+While the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`). Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
+
+```{r, rgl = TRUE}
+samples <- rstan::extract(fit_sigmoid2_divergent)
+plot3d(samples$w, samples$k, samples$lp__)
+```
+
+The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with much higher `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ and $b$ become very closely tied, but almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible, but for the true posterior, it should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences when traversing the ridge at $w = 0$.
+
+# Neural network: When ordering is not enough
+
+Feedforward neural net.
+
+# A hopelessly non-identified GP model
+
+GP with observation times as variables.
+
+# Computing environment
+
+```{r}
+sessionInfo()
+```
+
