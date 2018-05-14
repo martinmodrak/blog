@@ -1,6 +1,7 @@
 ---
 title: "Identifying non-identifiability"
 date: 2018-05-14
+tags: ["R","Stan","Divergences"]
 draft: true
 ---
 
@@ -28,7 +29,10 @@ Well, let's get our hands dirty!
 ```{r setup, results='hide',message=FALSE,warning=FALSE}
 library(tidyverse)
 library(rstan)
+library(bayesplot)
+library(tidybayes)
 library(knitr)
+library(here)
 library(rgl)
 knit_hooks$set(webgl = hook_webgl)
 
@@ -117,7 +121,7 @@ y_{true} &= \frac{1}{1 + e^{-wx-b}} \\
 y &\sim N(y_{true},\sigma)
 \end{align}
 $$
-Here $w$ and $b$ are the only parameters of the model, the corresponding Stan code is below:
+Here $w$ and $b$ are the only parameters of the model. The model is a bit artificial, but it is actually a component of larger gene expression models I work with. The corresponding Stan code is below:
 
 ```{r cache=TRUE, results = 'hide'}
 stan_code_sigmoid <- "
@@ -190,6 +194,7 @@ This creates a large area of the posterior where the value of $w$ and $b$ does n
 
 This is, in my experience, one of the ways that weak identifiability may hurt sampling - the model maybe weakly identified only for a subset of the parameter space while there is another area where the likelihood has a huge contribution and this may require different step size for the sampler. 
 
+The issue may be partially redeemed by reparametrization using $a = \mathrm{E}(wx + b), b = \mathrm{sd}(wx + b)$. You can then set priors on $a, b$ that avoid the tails of the sigmoid while being independent of $x$.
 
 # A model with non-identified special case
 
@@ -276,15 +281,279 @@ rgl::plot3d(samples$w, samples$k, samples$lp__, xlab = "w", ylab = "k", zlab = "
 
 The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ and $b$ become very closely tied, but almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible, but for the true posterior, it should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences when traversing the ridge at $w = 0$.
 
-When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. These kind of issues however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available, providing that the data sometimes represent a special case and sometimes require the full model. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma))$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)!
+When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. These kind of issues however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available, providing that the data sometimes represent a special case and sometimes require the full model. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma))$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)! Here you can also find more discussion of the reparametrizations I use to make this kind of models converge.
 
 # Neural network: When ordering is not enough
 
-Feedforward neural net.
+At this point it would make sense to mention mixture models, but as those are covered by the aforementioned [case study](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html), we'll go straight ahead to the desperate wilderness of models too broken to fix. And neural networks are the prime attraction in this godforsaken land.
+
+We don't need to go fancy. Let's have a feedforward neural net with two inputs, two hidden layers of two neurons each and a single output neuron.
+
+![](/post/2018-non-identifiability_files/nn.png)
+
+We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid be non-dentifiable by  itself, we ignore all the bias parameters. 
+Below is a Stan model - optimized for readability, not brevity or generalizability. Since it seems there might be some symmetries, and we learned our lesson from mixture models, we'll try at least to force the weights for the output neuron to be ordered.
+
+```{r, results='hide', cache=TRUE}
+stan_code_neural <- "
+
+
+data {
+  int N;
+  matrix[N,2] x;
+  int<lower=0, upper=1> y[N];
+  real prior_width;
+}
+
+parameters {
+  matrix[2,2] weights1;
+  matrix[2,2] weights2;
+  ordered[2] weights_out;
+}
+
+model {
+  matrix[N,2] input1 = x * weights1;
+  matrix[N,2] output1 = inv_logit(input1);
+
+  matrix[N,2] input2 = output1 * weights2;
+  matrix[N,2] output2 = inv_logit(input2);
+
+  vector[N] input_out = output2 * weights_out;
+  vector[N] output_out = inv_logit(input_out);
+  y ~ bernoulli(output_out);
+
+  to_vector(weights1) ~ normal(0, prior_width);
+  to_vector(weights2) ~ normal(0, prior_width);
+  weights_out ~ normal(0, prior_width);
+}
+" 
+
+model_neural <- stan_model(model_code = stan_code_neural)
+```
+And in the spirit of the best traditions of the field of machine learning, we'll try to teach XOR to the neural network. It does not go well.
+
+```{r, cache=TRUE}
+set.seed(1324578)
+sigma <- 0.1
+N <- 200
+
+x <- array(as.integer(rbernoulli(N * 2)), c(N,2))
+y <- xor(x[,1], x[,2])
+
+data_neural <- list(N = N, x = x, y = y, sigma = sigma, prior_width = 5)
+fit_neural <- sampling(model_neural, data = data_neural, chains = 8)
+print(fit_neural)
+```
+```{r, warning = FALSE}
+fit_for_bayesplot <- as.array(fit_neural)
+mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]"), alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
+```
+
+And why are there divergences? Looking at the pairs plot provides some hints:
+
+```{r}
+pairs(fit_neural, pars = c("weights2[1,2]","lp__"))
+```
+
+My best guess is that the divergences arise because the sampler adapts to the wider mode and then has trouble exploring the two narrower modes, but this is just guesswork. Also note that all the modes have roughly the sampe posterior density, meaning that they truly represent separate, equally correct solutions.
+
+
+There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes where the neurons are relabelled, but the network is the same. However, these are just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
+
 
 # A hopelessly non-identified GP model
 
+There is still a way to move non-identifiability to the next level.
 GP with observation times as variables.
+
+
+```{r, results='hide', cache=TRUE}
+stan_code_gp <- "
+data {
+  int N;
+  real x[N];
+  vector[N] y;
+  real<lower=0> gp_length;
+  real<lower=0> gp_scale;
+  real<lower=0> sigma;
+}
+
+transformed data {
+  vector[N] mu = rep_vector(0, N);
+}
+
+parameters {
+  vector[N] y_est_raw;
+}
+
+transformed parameters {
+  vector[N] y_est;
+  // Using the latent variable GP coding form Stan manual, 
+  // with the Cholesky decomposition
+  {
+    matrix[N, N] L_K;
+    matrix[N, N] K = cov_exp_quad(x, gp_scale, gp_length);
+    for (n in 1:N) {
+      K[n, n] = K[n, n] + 1e-12; //Ensure positive definite
+    }
+    L_K = cholesky_decompose(K);
+    y_est = L_K * y_est_raw;
+  }
+}
+
+model {
+  y ~ normal(y_est, sigma);
+  y_est_raw ~ normal(0, 1);
+}
+
+"
+
+model_gp <- stan_model(model_code = stan_code_gp)
+```
+```{r, cache=TRUE}
+set.seed(25748422)
+simulate_gp <- function(x) {
+  N <- length(x)
+  gp_length <- 0.3
+  gp_scale <- 1
+  sigma <- 0.1
+  cov_m <- matrix(0, nrow <- N, ncol <- N)
+  for(i in 1:N) {
+    for(j in i:N) {
+      cov_m[i,j] <- gp_scale ^ 2 * exp(-0.5 * (1 / gp_length ^ 2) * (x[i] - x[j])^2)
+      cov_m[j,i] <- cov_m[i,j]
+    }
+  }
+  chol_cov_m <- chol(cov_m)
+  y <- chol_cov_m %*% rnorm(N, 0, 1)
+  
+  list(N = N, x = x, y = array(y, N), gp_length = gp_length, gp_scale = gp_scale, sigma = sigma)
+}
+
+data_gp <- simulate_gp(x = seq(0.01,0.99, length.out = 10))
+fit_gp <- sampling(model_gp, data = data_gp)
+summary(fit_gp)$summary %>% head()
+```
+```{r}
+samples_to_show <- sample(1:4000, 50)
+fit_gp %>% 
+  tidybayes::spread_samples(y_est[x_index]) %>% 
+  inner_join(data.frame(x_index = 1:data_gp$N, x = data_gp$x), by = c("x_index" = "x_index")) %>% 
+  mutate(sample_id = (.chain - 1) * 1000 + .iteration ) %>%
+  filter(sample_id %in% samples_to_show) %>% 
+  ggplot(aes(x = x, y = y_est, group = sample_id, color = .chain)) + geom_line(alpha = 0.1, color = "blue") +
+  geom_point(data = data.frame(x = data_gp$x, y = data_gp$y), aes(x = x, y = y), inherit.aes = FALSE)
+```
+
+```{r, results='hide', cache=TRUE}
+stan_code_gp_mess <- "
+data {
+  int N;
+  vector[N] y;
+  real<lower=0> gp_length;
+  real<lower=0> gp_scale;
+  real<lower=0> sigma;
+  vector<lower=0, upper=1>[N] x_prior_mean;
+  real<lower=0> x_prior_tau;
+}
+
+transformed data {
+  vector[N] mu = rep_vector(0, N);
+}
+
+parameters {
+  real<lower=0, upper = 1> x[N];
+  vector[N] y_est_raw;
+}
+
+transformed parameters {
+  vector[N] y_est;
+  // Using the latent variable GP coding form Stan manual, 
+  // with the Cholesky decomposition
+  {
+    matrix[N, N] L_K;
+    matrix[N, N] K = cov_exp_quad(x, gp_scale, gp_length);
+    for (n in 1:N) {
+      K[n, n] = K[n, n] + 1e-12; //Ensure positive definite
+    }
+    L_K = cholesky_decompose(K);
+    y_est = L_K * y_est_raw;
+  }
+}
+
+model {
+  y ~ normal(y_est, sigma);
+  y_est_raw ~ normal(0, 1);
+  x ~ beta(x_prior_mean * x_prior_tau,  (1 - x_prior_mean) * x_prior_tau);
+}
+
+"
+
+model_gp_mess <- stan_model(model_code = stan_code_gp_mess)
+```
+
+
+```{r, cache=TRUE}
+set.seed(42148744)
+
+data_gp_mess_uniform <- data_gp
+#This puts uniform prior on all x
+data_gp_mess_uniform$x_prior_mean = rep(0.5, data_gp$N)
+data_gp_mess_uniform$x_prior_tau = 2
+
+fit_gp_mess <- sampling(model_gp_mess, data = data_gp_mess_uniform)
+summary(fit_gp_mess)$summary %>% head()
+```
+
+```{r, warning = FALSE}
+fit_for_bayesplot <- as.array(fit_gp_mess)
+mcmc_trace(fit_for_bayesplot, pars = c("x[1]","y_est[1]"), alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
+
+
+plot_gp_mess <- function(fit_gp_mess) {
+  samples_to_show <- sample(1:4000, 50)
+  fit_gp_mess %>% 
+    tidybayes::spread_samples(y_est[x_index], x[x_index]) %>% 
+    mutate(sample_id = (.chain - 1) * 1000 + .iteration ) %>%
+    filter(sample_id %in% samples_to_show) %>% 
+    ggplot(aes(x = x, y = y_est, group = sample_id, color = as.factor(.chain))) + geom_line(alpha = 0.3) +
+    geom_point(data = data.frame(x = data_gp$x, y = data_gp$y), aes(x = x, y = y), inherit.aes = FALSE)
+}
+
+plot_gp_mess(fit_gp_mess)
+```
+
+```{r, cache=TRUE}
+set.seed(741284)
+data_gp_mess_informed <- data_gp
+data_gp_mess_informed$x_prior_mean = data_gp$x
+data_gp_mess_informed$x_prior_tau = 1000
+
+informed_init <- function(){
+  list(x = data_gp$x)
+}
+
+fit_gp_mess_informed <- sampling(model_gp_mess, data = data_gp_mess_informed, init = informed_init)
+summary(fit_gp_mess_informed)$summary %>% head()
+
+plot_gp_mess(fit_gp_mess_informed)
+
+```
+
+
+```{r, cache=TRUE}
+set.seed(32148422)
+data_gp_mess_less_informed <- data_gp
+data_gp_mess_less_informed$x_prior_mean = data_gp$x
+data_gp_mess_less_informed$x_prior_tau = 500
+
+fit_gp_mess_less_informed <- sampling(model_gp_mess, data = data_gp_mess_less_informed, init = informed_init)
+summary(fit_gp_mess_less_informed)$summary %>% head()
+
+
+plot_gp_mess(fit_gp_mess_less_informed)
+
+```
 
 # Computing environment
 
