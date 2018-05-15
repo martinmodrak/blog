@@ -109,7 +109,7 @@ pairs(fit_linear2, pars = "beta")
 
 What happens is that the ridge in the posterior becomes too long and the sampler cannot traverse it efficiently, resulting in transitions that exceed the maximum treedepth. The root of the problem is that the sampler has to choose a step size that is shorter than the width of the ridge to not diverge when moving tangentially to the ridge direction. With such a small step size, the sampler cannot move across the length of the ridge in one iteration. Still, the results should be unbiased and if we manage to get a reasonable `n_eff` (which we do), there is no reason to worry.
 
-While this particular model works well unless we set the prior too wide, such linear correlations in the pairs plot are a bad sign and you should try to avoid them as they can produce problems when interacting with other components of a larger model. It might make sense to reparametrize using the sum or ratio of the variables in question.
+**Take home message**: While this particular model works well unless we set the prior too wide, linear correlations in the pairs plot are a bad sign and you should try to avoid them as they can produce problems when interacting with other components of a larger model. It might make sense to reparametrize using the sum or ratio of the variables in question.
 
 # A weakly-identified model leading to divergences
 
@@ -121,6 +121,7 @@ y_{true} &= \frac{1}{1 + e^{-wx-b}} \\
 y &\sim N(y_{true},\sigma)
 \end{align}
 $$
+
 Here $w$ and $b$ are the only parameters of the model. The model is a bit artificial, but it is actually a component of larger gene expression models I work with. The corresponding Stan code is below:
 
 ```{r cache=TRUE, results = 'hide'}
@@ -189,12 +190,15 @@ pairs(fit_sigmoid_ok, pars = c("w","b"))
 pairs(fit_sigmoid_divergent, pars = c("w","b"))
 ```
 
-The issue is that for the second dataset, we sampled $x$ towards the tail of the sigmoid and almost all $y$ are thus close to 1, giving us little information about the parameters. However, the model strictly enforces that $w x + b > 0$.
+The issue seems to be that for the second dataset, we sampled $x$ towards the tail of the sigmoid and almost all $y$ are thus close to 1, giving us little information about the parameters. However, the model strictly enforces that $w x + b > 0$.
 This creates a large area of the posterior where the value of $w$ and $b$ does not matter much (requiring a large step size to traverse) and a thin sharp boundary around $wx + b \simeq 0$ where a smaller step size is required to traverse safely. Transitions crossing the boundary often diverge due to large step size, leading to overexploration of the flat area and bias.
 
 This is, in my experience, one of the ways that weak identifiability may hurt sampling - the model maybe weakly identified only for a subset of the parameter space while there is another area where the likelihood has a huge contribution and this may require different step size for the sampler. 
 
 The issue may be partially redeemed by reparametrization using $a = \mathrm{E}(wx + b), b = \mathrm{sd}(wx + b)$. You can then set priors on $a, b$ that avoid the tails of the sigmoid while being independent of $x$.
+
+**Take home message**: Sharp boundaries of otherwise diffuse regions in the posterior (as seen above) are  worth investigating.
+
 
 # A model with non-identified special case
 
@@ -206,6 +210,7 @@ y_{true} &= \frac{k}{1 + e^{-wx-b}} \\
 y &\sim N(y_{true},\sigma)
 \end{align}
 $$
+
 giving us the following Stan code:
 
 ```{r cache=TRUE, results ='hide'}
@@ -234,6 +239,7 @@ model {
 
 model_sigmoid2 <- stan_model(model_code = stan_code_sigmoid2)
 ```
+
 This time we will simulate two datasets with the same $x$ and $k = b = 1$, but one will have $w = 1$ while the other one will feature $w = 0$.
 
 ```{r cache=TRUE}
@@ -271,6 +277,7 @@ As has become the habit in this post, the model diverges for the second dataset.
 pairs(fit_sigmoid2_ok, pars = "energy__", include = FALSE)
 pairs(fit_sigmoid2_divergent, pars = "energy__", include = FALSE)
 ```
+
 While the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
 
 ```{r, webgl=TRUE}
@@ -283,16 +290,24 @@ The thing to notice here is that for $w = 0$, there is a thin ridge in the poste
 
 When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. These kind of issues however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available, providing that the data sometimes represent a special case and sometimes require the full model. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma))$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)! Here you can also find more discussion of the reparametrizations I use to make this kind of models converge.
 
+**Take home message**: Worry about degenerate special cases of your model. A 3D trivariate plot of two parameters vs. the posterior, makes it really neatly visible when your posterior is not unimodal.
+
+
 # Neural network: When ordering is not enough
 
-At this point it would make sense to mention mixture models, but as those are covered by the aforementioned [case study](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html), we'll go straight ahead to the desperate wilderness of models too broken to fix. And neural networks are the prime attraction in this godforsaken land.
+At this point it would make sense to mention mixture models, but as those are covered by the aforementioned [case study](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html), we'll go straight ahead to the desperate wilderness of models too broken to fix. And neural networks are a prime attraction in this godforsaken land.
 
 We don't need to go fancy. Let's have a feedforward neural net with two inputs, two hidden layers of two neurons each and a single output neuron.
 
 ![](/post/2018-non-identifiability_files/nn.png)
 
-We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid be non-dentifiable by  itself, we ignore all the bias parameters. 
-Below is a Stan model - optimized for readability, not brevity or generalizability. Since it seems there might be some symmetries, and we learned our lesson from mixture models, we'll try at least to force the weights for the output neuron to be ordered.
+We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid may be non-dentifiable by itself, we ignore all the bias parameters, so that for inputs $x_1,x_2$ the activation function is:
+
+$$
+\frac{1}{1+e^{-\sum w_i x_i}}
+$$
+
+Below is the corresponding Stan model - optimized for readability, not brevity or generalizability. Since it seems there might be some symmetries, and we learned our lesson from mixture models, we'll try at least to force the weights for the output neuron to be ordered.
 
 ```{r, results='hide', cache=TRUE}
 stan_code_neural <- "
@@ -330,7 +345,8 @@ model {
 
 model_neural <- stan_model(model_code = stan_code_neural)
 ```
-And in the spirit of the best traditions of the field of machine learning, we'll try to teach XOR to the neural network. It does not go well.
+
+In the spirit of the best traditions of the field of machine learning, we'll try to teach XOR to the neural network. It does not go well. To make the pathologies better visible, we will use 8 chains instead of the usual 4.
 
 ```{r, cache=TRUE}
 set.seed(1324578)
@@ -344,28 +360,44 @@ data_neural <- list(N = N, x = x, y = y, sigma = sigma, prior_width = 5)
 fit_neural <- sampling(model_neural, data = data_neural, chains = 8)
 print(fit_neural)
 ```
-```{r, warning = FALSE}
+
+We note the divergences, very low `n_eff` and large `Rhat`. This time let's start by inspecting some traceplots - I chose the ones I consider most interesting but in practice you would want to look at all of them (once again those are also available in ShinyStan):
+
+```{r, warning = FALSE, message = FALSE}
 fit_for_bayesplot <- as.array(fit_neural)
-mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]"), alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
+mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]"), 
+           alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
 ```
 
-And why are there divergences? Looking at the pairs plot provides some hints:
+We clearly see that there are multiple modes and each chain is stuck in its mode and does not mix with others. The first trace plot shows that just investigating the marginal posterior for `weights2[1,2]` shows 3 well separated modes. Looking at the traceplot for `weights1[2,2]` we see that there have to be even more modes as here, chain 2 (green-brown-ish?) clusters with chain 5 (blue), while in the first traceplot it clusters with chain 8 (pink). 
+
+Looking at the pairs plot provides some additional hints:
 
 ```{r}
 pairs(fit_neural, pars = c("weights2[1,2]","lp__"))
 ```
 
-My best guess is that the divergences arise because the sampler adapts to the wider mode and then has trouble exploring the two narrower modes, but this is just guesswork. Also note that all the modes have roughly the sampe posterior density, meaning that they truly represent separate, equally correct solutions.
+We see that at least the two "denser" modes are symmetric across zero and that they reach about the same maximum `lp__` as the "diffuse" mode. This means that to identify the model we need have to somehow choose one of those modes, but there is clearly not a "best" (much higher `lp__`) mode.
+
+My best guess is that the divergences arise when the sampler (unsuccesfully) tries to switch between individual modes and the geometry gets narrower in some parameters and wider in others, but this is just guesswork. 
 
 
-There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes where the neurons are relabelled, but the network is the same. However, these are just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
+There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes where the neurons are relabelled, but the network is the same. To some extent we could get rid of them by ordering one of the weights in each layer. However, these are just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
+
+**Take home message**: Non overlaping traces without treedepth warnings indicate multimodality. If the modes have about the same `lp__`, some symmetry breaking constraints may help. If there is one mode with much larger `lp__` than the others it might make sense to favor this one by appropriate priors/reparametrization.
 
 
 # A hopelessly non-identified GP model
 
-There is still a way to move non-identifiability to the next level.
-GP with observation times as variables.
+In the above example, there were multiple discrete and well separated modes. But there is still a way to move non-identifiability to the next level. We'll start with a simple and harmless [Gaussian process](https://en.wikipedia.org/wiki/Gaussian_process) model with squared exponential covariance function, the model is:
 
+$$
+\begin{align}
+y_{est} &\sim GP(\rho,\tau) \\
+y &\sim~ N(y_{est}, \sigma)
+\end{align}
+$$
+And the corresponding Stan code:
 
 ```{r, results='hide', cache=TRUE}
 stan_code_gp <- "
@@ -410,6 +442,9 @@ model {
 
 model_gp <- stan_model(model_code = stan_code_gp)
 ```
+
+We check that it works as expected:
+
 ```{r, cache=TRUE}
 set.seed(25748422)
 simulate_gp <- function(x) {
@@ -434,6 +469,9 @@ data_gp <- simulate_gp(x = seq(0.01,0.99, length.out = 10))
 fit_gp <- sampling(model_gp, data = data_gp)
 summary(fit_gp)$summary %>% head()
 ```
+
+We note the good diagnostics and also look at the posterior draws versus the observed values.
+
 ```{r}
 samples_to_show <- sample(1:4000, 50)
 fit_gp %>% 
