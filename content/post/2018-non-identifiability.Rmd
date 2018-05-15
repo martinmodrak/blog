@@ -2,7 +2,6 @@
 title: "Identifying non-identifiability"
 date: 2018-05-14
 tags: ["R","Stan","Divergences"]
-draft: true
 ---
 
 *This is a second post in my series on taming divergences in Stan models, see the [first post in the series](/2018/02/19/taming-divergences-in-stan-models/) for a general introduction. *
@@ -22,9 +21,9 @@ In this post I will show a few different types of issues that result from limite
 We will start with some weakly identified non-linear regression models and move toward models that are hopelessly multimodal (have multiple local maxima of posterior density), including a small neural network and Gaussian process with a Berkson-style error. I will focus on models that don't have any obvious error (like ommitted prior), although such errors can lead to non-identifiability. A recurring theme in this post is that identifiability may depend on the actual data as well as the model, keep that in mind when modelling!
 
 A frequent source of fitting issues due to non-identifiability are mixture models. There is an excellent
-[case study for mixture models](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html) by Michael Betancourt and I have nothing to add to this topic, so those are not covered.
+[case study for mixture models](http://mc-stan.org/users/documentation/case-studies/identifying_mixture_models.html) by Michael Betancourt and I have nothing to add to this topic, so mixtures are not covered here.
 
-Well, let's get our hands dirty!
+The post got pretty long so let's not hesitate and get our hands dirty!
 
 ```{r setup, results='hide',message=FALSE,warning=FALSE}
 library(tidyverse)
@@ -41,7 +40,7 @@ options(mc.cores = parallel::detectCores())
 ```
 
 
-# A weakly-identified model that (mostly) works
+# A weakly-identified linear model that (mostly) works
 
 First, let's start with a model I thought would have problems but that ended up mostly OK. The model is a simple regression with a quadratic term:
 
@@ -96,7 +95,7 @@ fit_linear <- sampling(model_linear, data = data_linear)
 pairs(fit_linear, pars = "beta")
 ``` 
 
-While the result is not very useful, the sampler worked well! We gained little information about each $beta$ individually (their range spans alomost all of the prior), but their sum is tightly constrained as witnessed by the strong negative correlation. But what if we increase `prior_width` to make the prior resemble a flat prior?
+While the result is not very useful, the sampler worked well! We gained little information about each $\beta$ individually (their range spans alomost all of the prior), but their sum is tightly constrained as witnessed by the strong negative correlation. So what if we increase `prior_width` to make the prior resemble a flat prior? We do get max treedepth warnings!
 
 ```{r cache=TRUE}
 set.seed(21645465)
@@ -107,13 +106,13 @@ fit_linear2 <- sampling(model_linear, data = data_linear2)
 pairs(fit_linear2, pars = "beta")
 ```
 
-What happens is that the ridge in the posterior becomes too long and the sampler cannot traverse it efficiently, resulting in transitions that exceed the maximum treedepth. The root of the problem is that the sampler has to choose a step size that is shorter than the width of the ridge to not diverge when moving tangentially to the ridge direction. With such a small step size, the sampler cannot move across the length of the ridge in one iteration. Still, the results should be unbiased and if we manage to get a reasonable `n_eff` (which we do), there is no reason to worry.
+What seems to happen is that the ridge in the posterior becomes too long and the sampler cannot traverse it efficiently, resulting in transitions that exceed the maximum treedepth. The root of the problem is that the sampler has to choose a step size that is shorter than the width of the ridge to not diverge when moving tangentially to the ridge direction. With such a small step size, the sampler cannot move across the length of the ridge in one iteration. Still, the results should be unbiased and if we manage to get a reasonable `n_eff` (which we do), there is no reason to worry. Improper flat prior would however lead to some actual trouble. Don't use improper priors, folks!
 
 **Take home message**: While this particular model works well unless we set the prior too wide, linear correlations in the pairs plot are a bad sign and you should try to avoid them as they can produce problems when interacting with other components of a larger model. It might make sense to reparametrize using the sum or ratio of the variables in question.
 
-# A weakly-identified model leading to divergences
+# A weakly-identified sigmoid model
 
-Let's move to a model where the non-identifiability actually wreaks havoc. Once again, the model works for some data, but breaks for others even if all model assumptions do hold. The model tries to determine parameters of a sigmoid function that is observed noisily:
+Let's move to a model where the non-identifiability actually wreaks havoc. Once again, the model works for some data, but breaks for others - even if all model assumptions do hold. The model tries to determine parameters of a sigmoid function that is observed noisily:
 
 $$
 \begin{align}
@@ -150,7 +149,7 @@ model {
 model_sigmoid <- stan_model(model_code = stan_code_sigmoid)
 ```
 
-Now lets fit the model to simulated datasets with the exact same true parameter valuess $w = b = 1$, but different values of the independent variable $x$, in one case, $x$ is drawn from $N(0,2)$, in the other one, it is drawn from $N(0,5)$.
+Now lets fit the model to simulated datasets with the exact same true parameter values $w = b = 1$, but different values of the independent variable $x$. In the first case, $x$ is drawn from $N(0,2)$:
 
 ```{r cache=TRUE}
 set.seed(214575878)
@@ -175,23 +174,27 @@ simulate_sigmoid <- function(x) {
 data_sigmoid_ok <- simulate_sigmoid(rnorm(20, 0, 2))
 fit_sigmoid_ok <- sampling(model_sigmoid, data = data_sigmoid_ok)
 print(fit_sigmoid_ok)
+pairs(fit_sigmoid_ok, pars = c("w","b"))
+```
 
-data_sigmoid_divergent <-  simulate_sigmoid(rnorm(20, 5, 2)) # <- the mean of the distribution is altered!
+For the first dataset, the model converges and recovers parameters correctly. The pairs plot shows a nice gaussian blob, nothing to worry about. Now let's try a second dataset, this time $x$ is drawn from $N(5,2)$.
+
+```{r cache=TRUE}
+data_sigmoid_divergent <- simulate_sigmoid(rnorm(20, 5, 2)) 
 fit_sigmoid_divergent <- sampling(model_sigmoid, data = data_sigmoid_divergent)
 print(fit_sigmoid_divergent)
 ```
 
-Now, for the first dataset, the model converges and recovers parameters correctly. For the second one there is a huge number of divergences and the parameters are largely uncertain and overestimated. So once again, the model is identifiable in principle, but the extreme data introduce problems. 
+For the second dataset, there is a huge number of divergences and the parameters are largely uncertain and overestimated. So once again, the model is identifiable in principle, but the extreme data introduce problems. 
 
 Let's try to visualise the posteriors - luckily we only have two parameters, so it is easy to see everything at once!
 
 ```{r}
-pairs(fit_sigmoid_ok, pars = c("w","b"))
 pairs(fit_sigmoid_divergent, pars = c("w","b"))
 ```
 
 The issue seems to be that for the second dataset, we sampled $x$ towards the tail of the sigmoid and almost all $y$ are thus close to 1, giving us little information about the parameters. However, the model strictly enforces that $w x + b > 0$.
-This creates a large area of the posterior where the value of $w$ and $b$ does not matter much (requiring a large step size to traverse) and a thin sharp boundary around $wx + b \simeq 0$ where a smaller step size is required to traverse safely. Transitions crossing the boundary often diverge due to large step size, leading to overexploration of the flat area and bias.
+This creates a large area of the posterior where the value of $w$ and $b$ does not matter much (requiring a large step size to traverse) and a thin sharp boundary around $wx + b \simeq 0$ where a smaller step size is required to traverse safely. Transitions crossing the boundary often diverge due to large step size and are rejected, leading to overexploration of the flat area and bias.
 
 This is, in my experience, one of the ways that weak identifiability may hurt sampling - the model maybe weakly identified only for a subset of the parameter space while there is another area where the likelihood has a huge contribution and this may require different step size for the sampler. 
 
@@ -200,7 +203,7 @@ The issue may be partially redeemed by reparametrization using $a = \mathrm{E}(w
 **Take home message**: Sharp boundaries of otherwise diffuse regions in the posterior (as seen above) are  worth investigating.
 
 
-# A model with non-identified special case
+# A sigmoid model with non-identified special case
 
 We can make the above model even more problematic by introducing a parameter $k$ to generalize the sigmoid a bit more:
 
@@ -240,7 +243,7 @@ model {
 model_sigmoid2 <- stan_model(model_code = stan_code_sigmoid2)
 ```
 
-This time we will simulate two datasets with the same $x$ and $k = b = 1$, but one will have $w = 1$ while the other one will feature $w = 0$.
+This time we will simulate two datasets with the same $x \sim N(0,2)$, avoiding the extreme values. We will set $k = b = 1$ for both datasets. In addition, the first dataset  will have $w = 1$. Let's see how that goes:
 
 ```{r cache=TRUE}
 set.seed(98321456)
@@ -262,33 +265,38 @@ simulate_sigmoid2 <- function(x, w) {
   )
 }
 
-data_sigmoid2_ok <- simulate_sigmoid2(rnorm(20, 0, 2), 1)
+data_sigmoid2_ok <- simulate_sigmoid2(rnorm(20, 0, 2), w = 1)
 fit_sigmoid2_ok <- sampling(model_sigmoid2, data = data_sigmoid2_ok)
 print(fit_sigmoid2_ok)
+```
 
-data_sigmoid2_divergent <-  simulate_sigmoid2(rnorm(20, 0, 2), 0)
+Nice, no problems here. Let's see what happens when we set $w = 0$
+
+```{r cache=TRUE}
+data_sigmoid2_divergent <-  simulate_sigmoid2(rnorm(20, 0, 2), w = 0)
 fit_sigmoid2_divergent <- sampling(model_sigmoid2, data = data_sigmoid2_divergent)
 print(fit_sigmoid2_divergent)
 ```
 
-As has become the habit in this post, the model diverges for the second dataset. Note also that the parameter estimates for $k$ and $b$ are way off. (remember: even a few divergent transitions indicate sampling problems). Let's have a look at the pair plots:
+
+As has become the habit in this post, the model diverges for the second dataset. Note also that the parameter estimates for $k$ and $b$ are way off and their 95% credible intervals exclude the true value! (remember: even a few divergent transitions indicate sampling problems). Let's have a look at the pair plots for both models:
 
 ```{r}
 pairs(fit_sigmoid2_ok, pars = "energy__", include = FALSE)
 pairs(fit_sigmoid2_divergent, pars = "energy__", include = FALSE)
 ```
 
-While the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
+Clearly something substantial changed for the second model. But while the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot below with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
 
-```{r, webgl=TRUE}
+```{r, webgl=TRUE, message = FALSE}
 samples <- rstan::extract(fit_sigmoid2_divergent)
-open3d()
+open3d() %>% invisible()
 rgl::plot3d(samples$w, samples$k, samples$lp__, xlab = "w", ylab = "k", zlab = "lp__")
 ```
 
-The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ and $b$ become very closely tied, but almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible, but for the true posterior, it should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences when traversing the ridge at $w = 0$.
+The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ becomes very closely tied to $b$ - simultaneously almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible in the plot. But for the true posterior, this ridge should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences and rejections when traversing the narrow ridge at $w = 0$.
 
-When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. These kind of issues however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available, providing that the data sometimes represent a special case and sometimes require the full model. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma))$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)! Here you can also find more discussion of the reparametrizations I use to make this kind of models converge.
+What can you do about these kinds of problems? When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. Special cases however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma)$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)! The link also contains more discussion of the reparametrizations I use to make this kind of models converge.
 
 **Take home message**: Worry about degenerate special cases of your model. A 3D trivariate plot of two parameters vs. the posterior, makes it really neatly visible when your posterior is not unimodal.
 
@@ -301,7 +309,7 @@ We don't need to go fancy. Let's have a feedforward neural net with two inputs, 
 
 ![](/post/2018-non-identifiability_files/nn.png)
 
-We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid may be non-dentifiable by itself, we ignore all the bias parameters, so that for inputs $x_1,x_2$ the activation function is:
+We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid may be non-dentifiable by itself, we ignore all the bias parameters, so the only parameters become the weights $w$ of inputs $x$ and the activation function becomes:
 
 $$
 \frac{1}{1+e^{-\sum w_i x_i}}
@@ -358,18 +366,22 @@ y <- xor(x[,1], x[,2])
 
 data_neural <- list(N = N, x = x, y = y, sigma = sigma, prior_width = 5)
 fit_neural <- sampling(model_neural, data = data_neural, chains = 8)
-print(fit_neural)
+
+show_param_diags <- function(fit) {
+  summary(fit)$summary[,c("n_eff","Rhat")]
+}
+show_param_diags(fit_neural)
 ```
 
-We note the divergences, very low `n_eff` and large `Rhat`. This time let's start by inspecting some traceplots - I chose the ones I consider most interesting but in practice you would want to look at all of them (once again those are also available in ShinyStan):
+We note the divergences, very low `n_eff` and large `Rhat`. Remember that `n_eff` (effective sample size) is a measure of how well the posterior was sampled and `Rhat` is close to one if the chains have converged to the same posterior. This time let's start by inspecting some traceplots - I chose the ones I consider most interesting but in practice you would want to look at all of them (once again those are also available in ShinyStan):
 
 ```{r, warning = FALSE, message = FALSE}
 fit_for_bayesplot <- as.array(fit_neural)
-mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]"), 
-           alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
+mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]","weights1[1,2]"), 
+           facet_args = list(ncol = 1)) + scale_color_discrete()
 ```
 
-We clearly see that there are multiple modes and each chain is stuck in its mode and does not mix with others. The first trace plot shows that just investigating the marginal posterior for `weights2[1,2]` shows 3 well separated modes. Looking at the traceplot for `weights1[2,2]` we see that there have to be even more modes as here, chain 2 (green-brown-ish?) clusters with chain 5 (blue), while in the first traceplot it clusters with chain 8 (pink). 
+We clearly see that there are multiple modes and each chain is stuck in its mode and does not mix with others. The first trace plot shows that just investigating the marginal posterior for `weights2[1,2]` shows 3 well separated modes. Looking at the traceplot for `weights1[2,2]` we see that there have to be even more modes as here, chain 2 (green-brown-ish?) clusters with chain 5 (blue), while in the first traceplot it clusters with chain 8 (pink). The third trace plot shows one more different clustering, so we got at least 5 separate modes, yay!
 
 Looking at the pairs plot provides some additional hints:
 
@@ -382,9 +394,9 @@ We see that at least the two "denser" modes are symmetric across zero and that t
 My best guess is that the divergences arise when the sampler (unsuccesfully) tries to switch between individual modes and the geometry gets narrower in some parameters and wider in others, but this is just guesswork. 
 
 
-There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes where the neurons are relabelled, but the network is the same. To some extent we could get rid of them by ordering one of the weights in each layer. However, these are just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
+There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes when the neurons are relabelled, but the network is isomorphic. To some extent we could get rid of them by ordering one of the weights in each layer. We would however expect ordering of a single two neuron layer to halve the number of modes at best. Since we have two layers and more than 4 modes, ordering will probably not identify the model. In fact ordering is just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
 
-**Take home message**: Non overlaping traces without treedepth warnings indicate multimodality. If the modes have about the same `lp__`, some symmetry breaking constraints may help. If there is one mode with much larger `lp__` than the others it might make sense to favor this one by appropriate priors/reparametrization.
+**Take home message**: Non overlaping traces without treedepth warnings indicate multimodality. If the modes have about the same `lp__`, some symmetry breaking constraints may help. If there is one mode with much larger `lp__` than the others, it might make sense to favor this one by appropriate priors/reparametrization.
 
 
 # A hopelessly non-identified GP model
@@ -394,10 +406,12 @@ In the above example, there were multiple discrete and well separated modes. But
 $$
 \begin{align}
 y_{est} &\sim GP(\rho,\tau) \\
-y &\sim~ N(y_{est}, \sigma)
+y &\sim~ N(y_{est}(x), \sigma)
 \end{align}
 $$
-And the corresponding Stan code:
+
+Here, $x \in (0,1)$ are the locations where the GP is observed.
+The corresponding Stan code is:
 
 ```{r, results='hide', cache=TRUE}
 stan_code_gp <- "
@@ -443,7 +457,7 @@ model {
 model_gp <- stan_model(model_code = stan_code_gp)
 ```
 
-We check that it works as expected:
+We simulate some data and check that the model works well:
 
 ```{r, cache=TRUE}
 set.seed(25748422)
@@ -467,21 +481,23 @@ simulate_gp <- function(x) {
 
 data_gp <- simulate_gp(x = seq(0.01,0.99, length.out = 10))
 fit_gp <- sampling(model_gp, data = data_gp)
-summary(fit_gp)$summary %>% head()
+show_param_diags(fit_gp) %>% head()
 ```
 
 We note the good diagnostics and also look at the posterior draws versus the observed values.
 
-```{r}
+```{r, warning = FALSE}
 samples_to_show <- sample(1:4000, 50)
 fit_gp %>% 
   tidybayes::spread_samples(y_est[x_index]) %>% 
   inner_join(data.frame(x_index = 1:data_gp$N, x = data_gp$x), by = c("x_index" = "x_index")) %>% 
   mutate(sample_id = (.chain - 1) * 1000 + .iteration ) %>%
   filter(sample_id %in% samples_to_show) %>% 
-  ggplot(aes(x = x, y = y_est, group = sample_id, color = .chain)) + geom_line(alpha = 0.1, color = "blue") +
+  ggplot(aes(x = x, y = y_est, group = sample_id, color = as.factor(.chain))) + geom_line(alpha = 0.3) +
   geom_point(data = data.frame(x = data_gp$x, y = data_gp$y), aes(x = x, y = y), inherit.aes = FALSE)
 ```
+
+And now a magic trick that turns this well-behaved model into a mess: we'll treat $x$, the locations where the GP is observed as unknown. Since $x \in (0,1)$, we can specify a Beta prior for the locations with varying precision. The modified Stan code follows.
 
 ```{r, results='hide', cache=TRUE}
 stan_code_gp_mess <- "
@@ -530,6 +546,7 @@ model {
 model_gp_mess <- stan_model(model_code = stan_code_gp_mess)
 ```
 
+Let's start with noninformative uniform prior on $x$.
 
 ```{r, cache=TRUE}
 set.seed(42148744)
@@ -540,14 +557,20 @@ data_gp_mess_uniform$x_prior_mean = rep(0.5, data_gp$N)
 data_gp_mess_uniform$x_prior_tau = 2
 
 fit_gp_mess <- sampling(model_gp_mess, data = data_gp_mess_uniform)
-summary(fit_gp_mess)$summary %>% head()
+show_param_diags(fit_gp_mess) %>% head()
+
 ```
 
-```{r, warning = FALSE}
+We can note that we got *both* divergences and max treedepth, meaning that the step size is sometimes too large and sometimes too small, also both `n_eff` and `Rhat` are atrocious. Let's inspect some traces:
+
+```{r, warning=FALSE}
 fit_for_bayesplot <- as.array(fit_gp_mess)
-mcmc_trace(fit_for_bayesplot, pars = c("x[1]","y_est[1]"), alpha = 0.1, facet_args = list(ncol = 1)) + scale_color_discrete()
+mcmc_trace(fit_for_bayesplot, pars = c("x[1]","y_est[1]", "lp__"), facet_args = list(ncol = 1)) + scale_color_discrete()
+```
 
+In contrast to the neural net example, here the chains do not stick to a single mode, instead, they slowly wander across a wide range of values. Further, we see that the log posterior more or less overlaps across the explored parts of the parameter space. How does that look like when we plot the posterior?
 
+```{r, warning = FALSE}
 plot_gp_mess <- function(fit_gp_mess) {
   samples_to_show <- sample(1:4000, 50)
   fit_gp_mess %>% 
@@ -561,6 +584,16 @@ plot_gp_mess <- function(fit_gp_mess) {
 plot_gp_mess(fit_gp_mess)
 ```
 
+Not even close! We also see that the chains actually do sample different regions of the whole posterior, despite overlapping in marginal posteriors. Lets also take a look at some pairs plots:
+
+```{r}
+pairs(fit_gp_mess, pars = c("x[1]","y_est[1]", "lp__"))
+```
+
+Those pairs are not of much help, except that they once again show that there is no clean separation in log posterior (`lp__`) between the individual modes. Taken together this indicates that the posterior likely has many modes connected by thin, possibly curved ridges with only slightly smaller `lp__`. This is not surprising, since ordering of $x$ is only weakly constrained by the GP variance (when $x$ is close together, $y$ should be as well). In fact, we would expect the number of modes to be of order $N!$ (factorial of $N$).
+
+A nice diagnostic trick is to set informative priors on $x$, centered on the true values. The width of the prior required to make the model identified tells us something about the severity of the issues. This is where the Beta prior, in particular it's parametrization via mean and precision ($\tau$) comes in handy. So, lets see if $\tau = 1000$, e.g. the amount of information contained in 1000 coin flips is enough. Note that we also have to init the chains around the true values, otherwise the sharp prior introduces sampling problems.
+
 ```{r, cache=TRUE}
 set.seed(741284)
 data_gp_mess_informed <- data_gp
@@ -572,12 +605,13 @@ informed_init <- function(){
 }
 
 fit_gp_mess_informed <- sampling(model_gp_mess, data = data_gp_mess_informed, init = informed_init)
-summary(fit_gp_mess_informed)$summary %>% head()
+show_param_diags(fit_gp_mess_informed) %>% head()
 
 plot_gp_mess(fit_gp_mess_informed)
 
 ```
 
+And it indeed is enough, the diagnostics look good, the posterior looks good, everything's peachy. But we needed a very narrow prior. And we could not get away with much less information, consider setting $\tau = 500$: 
 
 ```{r, cache=TRUE}
 set.seed(32148422)
@@ -586,14 +620,25 @@ data_gp_mess_less_informed$x_prior_mean = data_gp$x
 data_gp_mess_less_informed$x_prior_tau = 500
 
 fit_gp_mess_less_informed <- sampling(model_gp_mess, data = data_gp_mess_less_informed, init = informed_init)
-summary(fit_gp_mess_less_informed)$summary %>% head()
+show_param_diags(fit_gp_mess_less_informed) %>% head()
 
 
 plot_gp_mess(fit_gp_mess_less_informed)
 
 ```
 
+Even though the posterior looks more or less OK, we see that the chains have not mixed well (notably, chain 2 forms a slightly separate cluster) as also indicated by some of the diagnostics. So we can conclude that the model is screwed as it is not identified, unless we already now the values of $x$ quite precisely.
+
+**Take home message**: Chains wandering slowly across large areas of posterior but with roughly the same `lp__` is a very bad sign. Putting narrow priors centered on true parameters is a neat trick to understand your model better.
+
+# Conclusion
+
+That's it - if you've made it to the bottom of this looooong post, you are great and thanks very much! I really hope that it will help you interpret your own models and help determine how to fix them or when to abandon a hopeless situation and get back to the drawing board. I also hope I have convinced you that identifiability depends not only on the model but also on the actual observed dataset.
+
+Best of luck with modelling!
+
 # Computing environment
+
 
 ```{r}
 sessionInfo()
