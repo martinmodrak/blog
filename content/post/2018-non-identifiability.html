@@ -12,6 +12,7 @@ tags: ["R","Stan","Divergences"]
 <h1>What is “non-identifiability”</h1>
 <p>In a strict sense, it means that there is not a unique local maximum of the posterior density - either because there are multiple separate maxima or because there is ridge/plateau where a set of points has the same posterior density.</p>
 <p>On the Stan forums the term seems to be used in a bit broader sense and also covers cases where the maximum of the posterior density is in a region that is approximately flat. This often happens when the posterior is dominated by the prior and the likelihood provides little information about the parameters. If this is the case, it is sometimes said that the model is <em>weakly identified</em>. A weakly identified model may become non-identified in the strict sense if a prior is not specified for all parameters. This is just another reason to specify proper priors for everything.</p>
+<p>Problems with identifiability are just one class of issues that are signalled in Stan by divergences and/or other diagnostics (max treedepth, low BFMI, low <code>n_eff</code>, large <code>Rhat</code>), the <a href="/2018/02/19/taming-divergences-in-stan-models/">first post in this series</a> has a more extensive list of other possible causes. Note also that except for Stan, most statistical/ML software won’t complain when you try to fit non-identifiable models, even though it may lead to noticeably biased inferences.</p>
 </div>
 <div id="scope" class="section level1">
 <h1>Scope</h1>
