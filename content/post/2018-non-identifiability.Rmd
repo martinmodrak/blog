@@ -294,7 +294,7 @@ open3d() %>% invisible()
 rgl::plot3d(samples$w, samples$k, samples$lp__, xlab = "w", ylab = "k", zlab = "lp__")
 ```
 
-The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ becomes very closely tied to $b$ - simultaneously almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible in the plot. But for the true posterior, this ridge should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences and rejections when traversing the narrow ridge at $w = 0$.
+The thing to notice here is that for $w = 0$, there is a thin ridge in the posterior with almost maximal `lp__` for a wide range of values for $k$. This is because for $w = 0$, the posterior ceases to depend on $x$ and $k$ becomes very closely tied to $b$ - simultaneously almost any value of $k$ that is admitted by the prior becomes feasible with suitable value of $b$. The ridge is so thin, that the sampler almost completely misses it and it is barely visible in the plot. But for the true posterior, this ridge should contribute a non-trivial amount of mass. Once again, the sampler adapts its step size to the wide distribution for $w \neq 0$ which leads to divergences and rejections when traversing the narrow ridge at $w = 0$, bringing the problem to our attention.
 
 What can you do about these kinds of problems? When you fit your model interactively, the best solution is to spot that your actual data are a special case and simplify your model. Special cases however become more of a worry when you need to automatically fit the model to a large number of datasets or refit it periodically as new data become available. The best solution I have found so far is to try fitting a simplified model first (here something like $x \sim N(a,\sigma)$). If the simplified model fits well and/or the full model diverges, the results of the simplified model are preferred. If you know of a better solution, please let me know - it is directly relevant to my work on [models of gene regulation](/post/2018-04-18-stancon/stancon.html)! The link also contains more discussion of the reparametrizations I use to make this kind of models converge.
 
@@ -309,7 +309,7 @@ We don't need to go fancy. Let's have a feedforward neural net with two inputs, 
 
 ![](/post/2018-non-identifiability_files/nn.png)
 
-We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid may be non-dentifiable by itself, we ignore all the bias parameters, so the only parameters become the weights $w$ of inputs $x$ and the activation function becomes:
+We will use the standard logistic sigmoid activation function and treat the problem as a binary classification. To make things simpler and because we saw that sigmoid may be non-dentifiable by itself, we ignore all the bias parameters, so the only parameters are the weights $w$ of inputs $x$ and the activation function becomes:
 
 $$
 \frac{1}{1+e^{-\sum w_i x_i}}
@@ -375,13 +375,13 @@ show_param_diags(fit_neural)
 
 We note the divergences, very low `n_eff` and large `Rhat`. Remember that `n_eff` (effective sample size) is a measure of how well the posterior was sampled and `Rhat` is close to one if the chains have converged to the same posterior. This time let's start by inspecting some traceplots - I chose the ones I consider most interesting but in practice you would want to look at all of them (once again those are also available in ShinyStan):
 
-```{r, warning = FALSE, message = FALSE}
+```{r, warning = FALSE, message = FALSE, fig.height=5}
 fit_for_bayesplot <- as.array(fit_neural)
-mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]","weights1[1,2]"), 
+mcmc_trace(fit_for_bayesplot, pars = c("weights2[1,2]","weights1[2,2]"), 
            facet_args = list(ncol = 1)) + scale_color_discrete()
 ```
 
-We clearly see that there are multiple modes and each chain is stuck in its mode and does not mix with others. The first trace plot shows that just investigating the marginal posterior for `weights2[1,2]` shows 3 well separated modes. Looking at the traceplot for `weights1[2,2]` we see that there have to be even more modes as here, chain 2 (green-brown-ish?) clusters with chain 5 (blue), while in the first traceplot it clusters with chain 8 (pink). The third trace plot shows one more different clustering, so we got at least 5 separate modes, yay!
+We clearly see that there are multiple modes and each chain is stuck in its mode and does not mix with others. The first trace plot shows that just investigating the marginal posterior for `weights2[1,2]` reveals 3 well separated modes. Looking at the traceplot for `weights1[2,2]` we see that there have to be even more modes as here, chain 2 (green-brown-ish?) clusters with chain 5 (blue), while in the first traceplot it clusters with chain 8 (pink). 
 
 Looking at the pairs plot provides some additional hints:
 
@@ -394,7 +394,7 @@ We see that at least the two "denser" modes are symmetric across zero and that t
 My best guess is that the divergences arise when the sampler (unsuccesfully) tries to switch between individual modes and the geometry gets narrower in some parameters and wider in others, but this is just guesswork. 
 
 
-There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes when the neurons are relabelled, but the network is isomorphic. To some extent we could get rid of them by ordering one of the weights in each layer. We would however expect ordering of a single two neuron layer to halve the number of modes at best. Since we have two layers and more than 4 modes, ordering will probably not identify the model. In fact ordering is just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
+There is not really much that can be done to make such models work. The most obvious issues come from symmetries of the network structure, providing multiple modes when the neurons are relabelled, but the network is isomorphic. To some extent we could get rid of them by ordering one of the weights in each layer. However, ordering is just the start and further issues just keep on coming - see for example [the forum thread on Bayesian neural networks](http://discourse.mc-stan.org/t/why-are-bayesian-neural-networks-multi-modal/3285/3) for more details.
 
 **Take home message**: Non overlaping traces without treedepth warnings indicate multimodality. If the modes have about the same `lp__`, some symmetry breaking constraints may help. If there is one mode with much larger `lp__` than the others, it might make sense to favor this one by appropriate priors/reparametrization.
 
@@ -611,7 +611,7 @@ plot_gp_mess(fit_gp_mess_informed)
 
 ```
 
-And it indeed is enough, the diagnostics look good, the posterior looks good, everything's peachy. But we needed a very narrow prior. And we could not get away with much less information, consider setting $\tau = 500$: 
+And it indeed is enough, the diagnostics look good, the posterior looks good, everything's peachy. But we needed a very narrow prior. And we could not get away with much less information, consider setting $\tau = 500$ (still a very narrow prior): 
 
 ```{r, cache=TRUE}
 set.seed(32148422)
