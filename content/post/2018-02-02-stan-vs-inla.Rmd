@@ -35,7 +35,6 @@ nu_i ~ normal(0, tau_nu)
 Let's setup our libraries.
 ```{r setup,message=FALSE,warning=FALSE}
 library(rstan)
-library(brms)
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
 library(INLA)
