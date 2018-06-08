@@ -1,0 +1,36 @@
+.remark-slide-content {
+  font-size: 160%;
+}
+
+.inverse {
+  background-color: #380a30 ;
+  color: #f2efea;
+}
+
+.footnote {
+  font-size: 60%;
+  right: 3em;
+  text-align: right;
+}
+
+th, td {
+  padding:10px;
+}
+
+.thanks {
+  margin-top:3em;
+  text-align:right;
+  font-weight:bold;
+}
+
+a, a > code {
+  color:#00bab0;
+}
+
+.copyright {
+  display: block;
+  position: absolute;
+  bottom: 1em;
+  left: 1em;
+  font-size: 70%;
+}
