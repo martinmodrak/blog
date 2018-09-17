@@ -1,5 +1,6 @@
 ---
-title: "Tests in R Markdown"
+title: "A Plea for Tests in R Markdown"
+slug: "tests-in-r-markdown"
 date: 2018-09-17
 tags: ["Rant","Markdown","Notebook"]
 ---
