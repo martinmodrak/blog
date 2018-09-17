@@ -31,19 +31,22 @@ And this actually gave me the error message, as the data was not - contrary to m
 ```
 non_identified_data <- main_data %>%
     select(municipality,postcode) %>%
-    semi_join(non_unique_rows, by = c("postcode" = "postcode", "municipality" = "municipality"))
+    semi_join(non_unique_rows, 
+      by = c("postcode" = "postcode", 
+        "municipality" = "municipality"))
     
 if(nrow(non_identified_data) > 0) {
   stop("Data couldn't be mapped to census data")
 }
 ```
 
-I could have run the check just once from the console, but storing it in the notebook has two core advantages:
+I could have run the check just once from the console, but storing it in the notebook has some core advantages:
 
-* The code can be found and reused later
-* When you change some preprocessing steps or update your data to a newer version you will be notified of problems
+* The test documents some of the intent and assumptions you make about your analysis and/or data.
+* The test code can be found and reused later.
+* When you change some preprocessing steps or update your data to a newer version you will be notified of problems.
 
-The latter advantage became apparent when I had a complicated join that was however supposed to only give exactly one match for each row in the data, so I wrote:
+The last advantage became apparent when I had a complicated join that was however supposed to only give exactly one match for each row in the data, so I wrote:
 
 ```
 main_data_augmented <- main_data %>% 
@@ -57,4 +60,4 @@ if(nrow(main_data_augmented) != nrow(main_data)) {
 
 This worked nicely. Later, I changed how I prepare the tables that go into the join, thinking it couldn't break anything and the above check fired, because (obviously) I made a mistake. If there was no check, the downstream analysis would run without complaining, but some rows from `main_data` would be actually copied twice as they now had more matches.
 
-Since you should do such checks anyway to ensure your analysis is correct, storing them in the notebook is very little additional effort and can save you a lot of trouble. So please, write tests and checks within your notebooks!
+Since you should do such checks anyway to ensure your analysis is correct, storing them in the markdown file is very little additional effort and can save you a lot of trouble. So please, write tests and checks within your notebooks!
