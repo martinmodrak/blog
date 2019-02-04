@@ -1,4 +1,4 @@
-baseurl = "http://www.martinmodrak.cz/"
+baseurl = "https://www.martinmodrak.cz/"
 languageCode = "en-us"
 title = "Martin Modrák"
 theme = "hugo-tanka"
