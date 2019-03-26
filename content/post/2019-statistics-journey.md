@@ -1,11 +1,12 @@
 ---
 title: "Thank you: Statistics as a Journey"
 date: 2019-03-24
-draft: true
 tags: ["Rant","Statistics"]
 ---
 
-Recently another high-profile piece on [abandoning statistical significance](https://www.nature.com/articles/d41586-019-00857-9) by Amrhein, Greenland & McShane was published. I have mixed feelings about this, me and my Twitter bubble are mostly like "Another one of those?!"... But how did I get from not doing almost any statistics five years ago to considering myself a cool insider that can look down on a prominent piece by a group of lifelong experts?  And what does that say about me?
+Recently another high-profile piece on [abandoning statistical significance](https://www.nature.com/articles/d41586-019-00857-9) by Amrhein, Greenland & McShane was published. I have mixed feelings about this, me and my Twitter bubble are mostly like "Another one of those?!"... But how did I get from not doing almost any statistics five years ago to considering myself a cool insider that can look down on a prominent piece by a group of lifelong experts?  And what does that say about me? 
+
+Spoiler: this post is mostly not about the Amrhein paper.
 
 ## Start small
 
@@ -20,7 +21,7 @@ But I didn't really have two groups and couldn't figure out how to extend the id
 I was proud of myself, I even showed a set of "nice" tables with effect sizes, p-values and highlighted significance:
 
 ![A nice summary - effect size on top, p-value just below.](/post/2019-statistics-journey/p_value_table.png)
-*Effect size on top, p-value just below. Isn't that just peachy?*
+*Effect size on top, p-value below. Doesn't that warm your heart?*
 
 Looking at the paper now, there is at least a faint relief that I did correct for multiple comparisons.
 
@@ -52,7 +53,7 @@ Some comments on Andrew's blog were also certainly an influence. Whatever the ti
 
 From a different angle, I noticed [Daniël Laken's blog](https://daniellakens.blogspot.com/) and read up on [Deborah Mayo's](https://errorstatistics.com/) work. And they made sense - who would have thought that frequentists weren't all evil monsters delaying the inevitable victory of the One True Gospel of Reverend Thomas Bayes? Maybe I still have a lot to learn about methods and statistics and everything around that?
 
-I worked on improving my knowledge of philosophy of science and finally started feeling like it's all a bit more complicated than I thought (surprise). These days, I work hard to include as many people as I can in constructive discussions about how to improve our methods. I am trying to find ways to make statistics understandable, to convey what models do in precise, but approachable language. I've stopped shaming people for their code or stats. I've attempted doing [constructive post-publication peer review](https://peeriodicals.com/peeriodical/inferring-regulatory-interactions/publications/403221C638F7255642520276F1EFF6). I try to be a good mentor to anyone who asks for guidance I can provide, but not give unsolicited advice. I aim to talk less, listen more and more readily say "I don't know". And it's hard, harder than the math part (which is still very hard). But it needs to be done - my current understanding is that people, communities and institutions are the most important part of any effort to improve science.
+I worked on improving my knowledge of philosophy of science and quickly started feeling like it's all a bit more complicated than I thought (surprise). These days, I work hard to include as many people as I can in constructive discussions about how to improve our methods. I am trying to find ways to make statistics understandable, to convey what models do in precise, but approachable language. I've stopped shaming people for their code or stats. I've attempted doing [constructive post-publication peer review](https://peeriodicals.com/peeriodical/inferring-regulatory-interactions/publications/403221C638F7255642520276F1EFF6). I try to be a good mentor to anyone who asks for guidance I can provide, but not give unsolicited advice. I aim to talk less, listen more and more readily say "I don't know". And it's hard, harder than the math part (which is still very hard). But it needs to be done - my current understanding is that people, communities and institutions are the most important part of any effort to improve science.
 
 Around this point, it would be useful to clarify what this story is about. Is this a cautionary tale, telling how manifesto's and rally cries can make people overzealous? Is this a story about my failure to see the bigger picture?  Or is this an ecouragement that pieces with strong opinion can make people grow  and continuously improve? Frankly, I am not sure.
 
