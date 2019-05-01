@@ -12,7 +12,7 @@ I love thinking about other people's statistical problems! So [get in touch](mai
 
 ## Small Inquiries
 
-If I have time, I will answer to small inquiries on [Stan Discourse](https://discourse.mc-stan.org). You can check out [list of my previous answers](https://discourse.mc-stan.org/u/martinmodrak/activity).
+If I have time, I will answer to small inquiries on [Stan Discourse](https://discourse.mc-stan.org), tag me in as @martinmodrak to get my attention. You can check out [list of my previous answers](https://discourse.mc-stan.org/u/martinmodrak/activity).
 
 ## Academic Research
 
