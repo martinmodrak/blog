@@ -5,16 +5,18 @@ tags: ["R","Stan","Modelling"]
 draft: true
 ---
 
-I recently needed to find the distribution of sum of non-identical negative binomial (NB) random variables. Although for some special cases the [sum is itself NB - TODO link](), analytical solution is not feasible in the general case. However it turns out there is a very handy tool called "Saddlepoint approximation" that is useful whenever you need densities of sums of arbitrary random variables. In this post I use the sum of NBs as a case study on how to derive your own approximations for basically any sum of random variables, show some tricks needed to get the approximation working in Stan and evaluate it against simpler approximations. To give credit where credit is due, I was introduced to the saddlepoint method via [Cross Validated answer on sum of Gamma variables](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318).
+I recently needed to find the distribution of sum of non-identical but independent negative binomial (NB) random variables. Although for some special cases the [sum is itself NB](https://stats.stackexchange.com/questions/45318/conditional-on-the-total-what-is-the-distribution-of-negative-binomials/354433#354433), analytical solution is not feasible in the general case. However it turns out there is a very handy tool called "Saddlepoint approximation" that is useful whenever you need densities of sums of arbitrary random variables. In this post I use the sum of NBs as a case study on how to derive your own approximations for basically any sum of independent random variables, show some tricks needed to get the approximation working in Stan and evaluate it against simpler approximations. To give credit where credit is due, I was introduced to the saddlepoint method via [Cross Validated answer on sum of Gamma variables](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318).
 
 # The approximation - big picture
-The saddlepoint approximation uses the [cumulant-generating function](https://en.wikipedia.org/wiki/Cumulant) (CGF) of a distribution to compute an approximate density at a given point. The neat part about CGFs is that the CGF of the sum of several variables is the sum of the individual CGFs! And CGFs are easy to come by, because the CGF is just the log of the moment-generating function and Wikipedia helpfully lists moment-generating functions for almost all distributions. Figuring out the CGF of almost any sum variable is thus straightforward. 
+
+The saddlepoint approximation uses the [cumulant-generating function](https://en.wikipedia.org/wiki/Cumulant) (CGF) of a distribution to compute an approximate density at a given point. The neat part about CGFs is that the CGF of the sum of several variables is the sum of the individual CGFs! And CGFs are easy to come by, because the CGF is just the log of the moment-generating function and Wikipedia helpfully lists moment-generating functions for almost all distributions. Figuring out the CGF of almost any sum variable (including variables from different families) is thus relatively straightforward. 
 
 The actual method for approximating density $f$ at point $x$, given the cumulant-generating function $K$, and its first and second derivatives ($K^\prime,K^{\prime\prime}$) is as follows:
 
 1) find the saddlepoint $s_x$ by solving:
 
 $$
+K^\prime(s_x) = x
 $$
 
 Generally, there is no closed-form solution for $s_x$, but since $K(x)$ is always convex, $K^\prime$ is always increasing, making it a nice target for numerical solutions. Still, since a different solution is needed for each $x$, finding $s$ tends to be a computational bottleneck.
@@ -22,28 +24,56 @@ Generally, there is no closed-form solution for $s_x$, but since $K(x)$ is alway
 2) Once we have $s_x$, we can approximate
 
 $$
-f(x) \simeq
+f(x) \simeq \frac1{\sqrt{2\pi K''(s_x)}} \exp(K(s_x) - x s_x) 
 $$
 
-In the above equation, we can add further terms with higher derivatives of $K$ (see e.g. [TODO link] for a general formula), but for the cases I was concerned with, the first two terms are enough.
-
-The nice thing about the saddlepoint approximation is that it can easily produce approximations for both discrete and continous densities, and doesn't constrain the approximation to be normal or of any other family (unlike Laplace approximation).
+The nice thing about the saddlepoint approximation is that it can easily produce approximations for both discrete and continous densities, and doesn't constrain the approximation to be normal (unlike Laplace approximation). One thing to note is that the saddlepoint approximation in the form above does not necessarily integrate to 1, so a renormalization might be needed if you are interested in the actual density. But to use in Stan, unnormalized density is all that's needed.
 
 # Saddlepoint for sum of NBs
 
-Given the above.
+The moment-generating function of NB distribution parametrized by number of failures $r$ and probability of success $p$ is:
 
-It turns out that the saddlepoint is not defined when $x = 0$, but for this special case, the density can be easily computed, as $f(0) = \prod_i P(X_i =0) = \prod_i  NB(0 | \mu_i,\phi_i)$. The non-existance of the saddlepoint solution for boundaries of the domain is actually a recurring theme, so it is useful to check for this when developing your approximations.
+$$
+M(t) = \left( \frac{1 - p}{1 - p e^t} \right)^r
+$$
 
+So, taking the log and summing over $n$ independent NB variables, the cumulant of sum of NB is:
 
-# Worked out saddlepoint approximations for other families
+$$
+K(u) = \sum_{i=1}^{n} r_i \left[ \log(1-p_i) - \log(1 - p_i e^u) \right]
+$$
+We now transform to the more useful parametrization of NB via mean $\mu$ and precision $\phi$ (i.e. $Var(X) = \mu + \frac{\mu^2}{\phi}$), where we have:
 
-- Sum of Gamma variables: [Answer on Cross Validated](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318)
-- Sum of binomials: [Liu & Quertermous: Approximating the Sum of Independent Non-Identical Binomial Random Variables](https://arxiv.org/abs/1712.01410)
+$$
+r_i = \phi_i \\
+p_i = \frac{\mu_i}{\phi_i + \mu_i} \\
+K(u) = \sum_{i=1}^{n} \phi_i \left[ \log \frac{\phi_i}{\phi_i + \mu_i} - \log \left(1 - \frac{\mu_i e^u}{\phi_i + \mu_i} \right) \right]  = \\ 
+=\sum_{i=1}^{n} \phi_i \left[ \log(\phi_i) - \log(\phi_i + \mu_i ( 1 - e^u)) \right]
+$$
 
-# Simpler alternatives
+Note that $K(u)$ does exist only when $\forall i:\phi_i + \mu_i ( 1 - e^u) > 0$ this constrains $u$ such that:
 
+$$
+\begin{align}
+\forall i : u &< \log(\phi_i + \mu_i) - \log(\mu_i) \\
+  u &< \log \left(\frac{\phi_i}{\mu_i} + 1 \right)
+\end{align}
+$$
 
+The first and second derivatives of $K$ are:
+
+$$
+K^\prime (u) = \sum_{i=1}^{n} \frac{\phi_i \mu_i e^u}{\phi_i + \mu_i (1 - e ^u)} \\
+K^{\prime\prime} (u) = \sum_{i=1}^{n} \frac{\phi_i \mu_i (\phi_i + \mu_i) e^u}{(\phi_i + \mu_i (1 - e ^u))^2} \\
+$$
+
+It turns out that the saddlepoint $s_x$ is not defined when $x = 0$, since the numerator of $K^\prime(u)$ is positive for all $u$ and the denominator has to be positive for $K$ to exist. But for this special case, the density can be easily computed, as $f(0) = \prod_i P(X_i =0) = \prod_i  NB(0 | \mu_i,\phi_i)$. The non-existence of the saddlepoint solution for boundaries of the domain is actually a recurring theme, as the existence of the solution is guaranteed only for the inner points, so it is useful to check for this when developing your approximations.
+
+# Implementing the approximation in Stan
+
+This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for $s_x$, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in [`algebra_solver`](https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html) that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on $s_x$ 
+
+So let us get our hands dirty and show some code:
 
 ```{r setup, message=FALSE, warning=FALSE}
 library(rstan)
@@ -57,10 +87,38 @@ rstan_options(auto_write = TRUE)
 set.seed(24683068)
 ```
 
+
+# Simpler alternatives
+
+To assess, how useful the approximation is in practice, we'll compare it to some more straightforward methods. One of those is [Method of moments](https://en.wikipedia.org/wiki/Method_of_moments_(statistics)). This is just a fancy name for choosing a distribution family and choosing it's parameters so that mean, variance (and possibly higher moments) match those of the desired distribution. In case of NBs, when $Y_i \sim NB(\mu_i, \phi_i)$ then
+
+$$
+E \left(\sum Y_i \right) = \sum \mu_i \\
+Var \left(\sum Y_i \right) = \sum \left( \mu_i + \frac{\mu_i^2}{\phi_i} \right)
+$$
+Simply because both mean and variance are linear operators. Maybe sum of NBs isn't that different from a NB distribution, so let's approximate
+
+$$
+\sum Y_i \approx NB(\bar\mu, \bar\phi)
+$$
+Solving for $\bar\mu$ and $\bar\phi$ from the mean and variance gives:
+
+$$
+\bar \mu = \sum \mu_i \\
+\bar \phi = \frac{ \left(\sum \mu_i \right)^2 }{\sum \frac{\mu_i^2}{\phi_i}}
+$$
+
+# Implementing sum of NBs in Stan
+
+All the math is neat
+
+# Evaluating performance
+
+
 dd
 
 ```{r}
-model_file <- here("static","2019-saddlepoint-approximation.stan","test_sum_nb.stan")
+model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb.stan")
 model_sum_nb <- stan_model(model_file)
 ```
 
@@ -188,3 +246,7 @@ plot_sbc_params(sbc_res_moments_10_large$params, x_axis_trans = "log10", y_axis_
 summarise_sbc_diagnostics(sbc_res_moments_10_large)
 ```
 
+# Worked out saddlepoint approximations for other families
+
+- Sum of Gamma variables: [Answer on Cross Validated](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318)
+- Sum of binomials: [Liu & Quertermous: Approximating the Sum of Independent Non-Identical Binomial Random Variables](https://arxiv.org/abs/1712.01410)
