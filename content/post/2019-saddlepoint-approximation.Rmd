@@ -3,7 +3,34 @@ title: "Approximate densities for sums of variables: Negative Binomials and sadd
 date: 2019-04-24
 tags: ["R","Stan","Modelling"]
 draft: true
+output:
+  blogdown::html_page:
+    toc: true
 ---
+
+```{r setup, message=FALSE, warning=FALSE, echo = FALSE}
+library(rstan)
+library(knitr)
+library(here)
+library(tidyverse)
+library(cowplot)
+library(rstanmodeldev)
+knitr::opts_chunk$set(echo = FALSE)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+
+fits_cache_dir <- here("cache")
+if(!dir.exists(fits_cache_dir)) {
+  dir.create(fits_cache_dir)
+}
+
+results_cache_dir <- here("content","post","_saddlepoint_cache")
+if(!dir.exists(results_cache_dir)) {
+  dir.create(results_cache_dir)
+}
+
+sbc_N_steps <- 1000
+```
 
 I recently needed to find the distribution of sum of non-identical but independent negative binomial (NB) random variables. Although for some special cases the [sum is itself NB](https://stats.stackexchange.com/questions/45318/conditional-on-the-total-what-is-the-distribution-of-negative-binomials/354433#354433), analytical solution is not feasible in the general case. However it turns out there is a very handy tool called "Saddlepoint approximation" that is useful whenever you need densities of sums of arbitrary random variables. In this post I use the sum of NBs as a case study on how to derive your own approximations for basically any sum of independent random variables, show some tricks needed to get the approximation working in Stan and evaluate it against simpler approximations. To give credit where credit is due, I was introduced to the saddlepoint method via [Cross Validated answer on sum of Gamma variables](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318).
 
@@ -40,92 +67,132 @@ $$
 So, taking the log and summing over $n$ independent NB variables, the cumulant of sum of NB is:
 
 $$
-K(u) = \sum_{i=1}^{n} r_i \left[ \log(1-p_i) - \log(1 - p_i e^u) \right]
+K(t) = \sum_{i=1}^{n} r_i \left[ \log(1-p_i) - \log(1 - p_i e^t) \right]
 $$
+
 We now transform to the more useful parametrization of NB via mean $\mu$ and precision $\phi$ (i.e. $Var(X) = \mu + \frac{\mu^2}{\phi}$), where we have:
 
 $$
 r_i = \phi_i \\
 p_i = \frac{\mu_i}{\phi_i + \mu_i} \\
-K(u) = \sum_{i=1}^{n} \phi_i \left[ \log \frac{\phi_i}{\phi_i + \mu_i} - \log \left(1 - \frac{\mu_i e^u}{\phi_i + \mu_i} \right) \right]  = \\ 
-=\sum_{i=1}^{n} \phi_i \left[ \log(\phi_i) - \log(\phi_i + \mu_i ( 1 - e^u)) \right]
+K(t) = \sum_{i=1}^{n} \phi_i \left[ \log \frac{\phi_i}{\phi_i + \mu_i} - \log \left(1 - \frac{\mu_i e^t}{\phi_i + \mu_i} \right) \right]  = \\ 
+=\sum_{i=1}^{n} \phi_i \left[ \log(\phi_i) - \log(\phi_i + \mu_i ( 1 - e^t)) \right]
 $$
 
-Note that $K(u)$ does exist only when $\forall i:\phi_i + \mu_i ( 1 - e^u) > 0$ this constrains $u$ such that:
+Note that $K(t)$ does exist only when $\forall i:\phi_i + \mu_i ( 1 - e^t) > 0$ this constrains $t$ such that:
 
 $$
 \begin{align}
-\forall i : u &< \log(\phi_i + \mu_i) - \log(\mu_i) \\
-  u &< \log \left(\frac{\phi_i}{\mu_i} + 1 \right)
+\tag{*}
+\forall i :  t &< log \left(\frac{\phi_i}{\mu_i} + 1 \right)
 \end{align}
 $$
 
 The first and second derivatives of $K$ are:
 
 $$
-K^\prime (u) = \sum_{i=1}^{n} \frac{\phi_i \mu_i e^u}{\phi_i + \mu_i (1 - e ^u)} \\
-K^{\prime\prime} (u) = \sum_{i=1}^{n} \frac{\phi_i \mu_i (\phi_i + \mu_i) e^u}{(\phi_i + \mu_i (1 - e ^u))^2} \\
+K^\prime (t) = \sum_{i=1}^{n} \frac{\phi_i \mu_i e^t}{\phi_i + \mu_i (1 - e^t)} \\
+K^{\prime\prime} (t) = \sum_{i=1}^{n} \frac{\phi_i \mu_i (\phi_i + \mu_i) e^t}{(\phi_i + \mu_i (1 - e ^t))^2} \\
 $$
 
-It turns out that the saddlepoint $s_x$ is not defined when $x = 0$, since the numerator of $K^\prime(u)$ is positive for all $u$ and the denominator has to be positive for $K$ to exist. But for this special case, the density can be easily computed, as $f(0) = \prod_i P(X_i =0) = \prod_i  NB(0 | \mu_i,\phi_i)$. The non-existence of the saddlepoint solution for boundaries of the domain is actually a recurring theme, as the existence of the solution is guaranteed only for the inner points, so it is useful to check for this when developing your approximations.
+It turns out that the saddlepoint $s_x$ is not defined when $x = 0$, since the numerator of $K^\prime(t)$ is positive for all $t$ and the denominator has to be positive for $K$ to exist. But for this special case, the density can be easily computed, as $f(0) = \prod_i P(X_i =0) = \prod_i  NB(0 | \mu_i,\phi_i)$. The non-existence of the saddlepoint solution for boundaries of the domain is actually a recurring theme, as the existence of the solution is guaranteed only for the inner points, so it is useful to check for this when developing your approximations.
 
 # Implementing the approximation in Stan
 
-This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for $s_x$, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in [`algebra_solver`](https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html) that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on $s_x$ 
+This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for $s_x$, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in [`algebra_solver`](https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html) that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on $s_x$ from the equation $(*)$ and `algebra_solver` turns out not to work when there are boundaries (even when initialized withing the boundaries). Instead we use the same method Stan uses for bounds on parameters and solve for unbounded $y_x$ where:
 
-So let us get our hands dirty and show some code:
+$$
+s_x = \min_i{log \left(\frac{\phi_i}{\mu_i} + 1 \right)} -e^{y_x} 
+$$
 
-```{r setup, message=FALSE, warning=FALSE}
-library(rstan)
-library(knitr)
-library(here)
-library(tidyverse)
-library(cowplot)
-library(rstanmodeldev)
-options(mc.cores = parallel::detectCores())
-rstan_options(auto_write = TRUE)
-set.seed(24683068)
+So let us get our hands dirty and show some code, starting with how to write the saddlepoint equation in a way that the `algebra_solver` can handle. Since $K^\prime$ is always positive, we transform the equation to log scale - partly because we might have some big $\sum\mu_i$ out there and partly because it seems nice - I didn't test the non-log version. So the equation we are actually solving for $s_x$ is:
+
+$$
+\log \sum_{i=1}^{n} \exp \left( \log\phi_i + \log \mu_i + s_x - \log(\phi_i + \mu_i - \mu_i \exp(s_x) \right) - x = 0
+$$
+Translated into stan we get:
+
+```{r}
+functions_lines <- readLines(here("static/post/2019-saddlepoint-approximation/sum_nb_functions.stan"))
+cat(paste0(functions_lines[2:24], collapse = "\n"))
 ```
 
 
-# Simpler alternatives
+Above, `y` are the unconstrained unknowns, which we transform via `s_transform` to the constrained space. Further we extract $\mu_i$ and $\phi_i$ from `theta` which can be parameters while `x_i` contains the observed sums (data). Since we have no real number data, `x_r` is ignored. The `algebra_solver` will try to find `y` such that `value` is 0 which is exactly when `s` is the solution to the saddlepoint equation.
 
-To assess, how useful the approximation is in practice, we'll compare it to some more straightforward methods. One of those is [Method of moments](https://en.wikipedia.org/wiki/Method_of_moments_(statistics)). This is just a fancy name for choosing a distribution family and choosing it's parameters so that mean, variance (and possibly higher moments) match those of the desired distribution. In case of NBs, when $Y_i \sim NB(\mu_i, \phi_i)$ then
+We use the `nb_sum_log_Kd_eq` to compute the actual saddlepoint density:
+
+```{r}
+cat(paste0(functions_lines[26:67], collapse = "\n"))
+```
+
+The above shows how the `algebra_solver` is called (I've kept the non-vectorized call in the comments for reference) - we combine $\mu_i$ and $\phi_i$ as params, pass a guess (0 works great, so we don't need to worry about details). The only weird part is `dummy_x_r` - I want it to be just an empty array, but it has to be of type `real` and has to be data. And I didn't find a way to make the compiler understand that unless I pass `dummy_x_r` from outside as in
+
+```
+transformed data {
+  real dummy_x_r[0];
+}
+
+...
+
+model {
+  sums ~ neg_binomial_sum_lpmf(mus, phis, dummy_x_r);
+}
+```
+
+
+# A simple baseline
+
+To assess, how useful the saddlepoint approximation is in practice, we'll compare it to a straightforward application of [Method of moments](https://en.wikipedia.org/wiki/Method_of_moments_(statistics)). This is just a fancy name for choosing a distribution family and choosing it's parameters so that mean, variance (and possibly higher moments) match those of the desired distribution. In case of NBs, when $Y_i \sim NB(\mu_i, \phi_i)$ then
 
 $$
 E \left(\sum Y_i \right) = \sum \mu_i \\
 Var \left(\sum Y_i \right) = \sum \left( \mu_i + \frac{\mu_i^2}{\phi_i} \right)
 $$
+
 Simply because both mean and variance are linear operators. Maybe sum of NBs isn't that different from a NB distribution, so let's approximate
 
 $$
 \sum Y_i \approx NB(\bar\mu, \bar\phi)
 $$
-Solving for $\bar\mu$ and $\bar\phi$ from the mean and variance gives:
+
+Solving for $\bar\mu$ and $\bar\phi$ by matching the mean and variance of the approximate distribution gives:
 
 $$
 \bar \mu = \sum \mu_i \\
 \bar \phi = \frac{ \left(\sum \mu_i \right)^2 }{\sum \frac{\mu_i^2}{\phi_i}}
 $$
 
-# Implementing sum of NBs in Stan
+This can be implemented very directly in Stan as:
 
-All the math is neat
+```{r}
+cat(paste0(functions_lines[69:74], collapse = "\n"))
+```
+
 
 # Evaluating performance
 
 
-dd
+We evaluate the model using [Simulation-based Calibration](https://arxiv.org/abs/1804.06788) (SBC). The main idea is that when I generate data exactly the way the model assumes, then for any $c$ the $c\%$ posterior interval should contain the true value an unobserved parameter in exactly $c\%$ of the cases. In other words the quantile in which the true value is found should be uniformly distributed. There are some caveats to this, read the paper for details.
 
-```{r}
+I am using my own implementation of SBC which is in my not very well documented, likely-never-on-CRAN package [`rstanmodeldev`](https://github.com/martinmodrak/rstanmodeldev). We run `r sbc_N_steps` simulations for each of the test cases.
+
+The first test case I will use is that I observe the sum of $G+1$ variables where I know $\mu_i$ and $\phi_i$ for $i \in {1 .. G}$ while $\mu_{G+1}$ and $\phi_{G+1}$ is unknown and has to be infered from $N$ observations of the sum.
+
+This is how this looks-like in Stan:
+
+```{r, message = FALSE}
 model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb.stan")
-model_sum_nb <- stan_model(model_file)
+cat(model_file)
+model_sum_nb <- stan_model(model_file, isystem = here("static","post","2019-saddlepoint-approximation"))
 ```
 
-Generating data
+Most notably, the way the sum of NBs is implemented is given as data. The `sum_nb_functions.stan` include contains the functions shown above.
 
-```{r}
-generator <- function(G, N, method = "saddlepoint", prior_mean_mus = 2, prior_sd_mus = 1) {
+And this is an R method to generate simulated data - this is a function that given parameters of the observed data gives a function that on each call generates both `true` and `observed` data in a format that matches the Stan model:
+
+```{r, echo = TRUE}
+generator <- function(G, N, method = "saddlepoint", observed_mean_mus = 2, observed_sd_mus = 1) {
   if(method == "saddlepoint") {
     method_id = 0
   } else if (method == "moments") {
@@ -135,22 +202,12 @@ generator <- function(G, N, method = "saddlepoint", prior_mean_mus = 2, prior_sd
   }
   
   function() {
-    all_mus <- rlnorm(G + 1, prior_mean_mus, prior_sd_mus)
+    all_mus <- rlnorm(G + 1, observed_mean_mus, observed_sd_mus)
     all_mus[G + 1] <- rlnorm(1, 5, 3)
     all_phis <- 1 / sqrt(abs(rnorm(G + 1)))
     sums <- array(-1, N)
-    repeats <- 0
     for(n in 1:N) {
-      repeat {
-        sums[n] <- sum(rnbinom(G + 1, mu = all_mus, size = all_phis))
-        if(sums[n] > 0) {
-          break;
-        } 
-        repeats <- repeats + 1
-      }
-    }
-    if(repeats > 0) {
-      cat(repeats, " repeats\n")
+      sums[n] <- sum(rnbinom(G + 1, mu = all_mus, size = all_phis))
     }
     list(
       observed = list(
@@ -160,7 +217,6 @@ generator <- function(G, N, method = "saddlepoint", prior_mean_mus = 2, prior_sd
         method = method_id,
         mus = array(all_mus[1:G], G),
         phis = array(all_phis[1:G], G)
-        #phis = all_phis
       ),
       true = list(
         extra_mu = all_mus[G+1],
@@ -171,80 +227,327 @@ generator <- function(G, N, method = "saddlepoint", prior_mean_mus = 2, prior_sd
 }
 ```
 
-Testing a single version to see it doesn't break terribly.
+Note that the prior mean and sd for $\mu_{G +1}$ is fixed while the meand and sd of the observed values may vary.
+
+## Sum of two NBs
 
 ```{r}
-data <- generator(G = 5, N = 5, "moments")()
-fit <- sampling(model_sum_nb, data$observed)
-evaluate_all_params(rstan::extract(fit), data$true)
+small_N <- 10
+seed_small <- 68752245 #I use the same seed so I evaluate on exactly the same data
 ```
 
-# Sum of two NBs
 
-Here we test a sum of two NBs - one is small and has known parameters, the other has unknown parameters and possibly larger mean (the prior mean is larger).
+Here we test a sum of two NBs - one is small and has known parameters, the other has unknown parameters and possibly larger mean (the prior mean is larger). We observe `r small_N` sums.
 
-Calibration and accuracy with saddlepoint approximation
+First, let's look at diagnostics:
 
 ```{r}
-sbc_res_saddlepoint_small <- sbc(model_sum_nb, generator(G = 1, N = 10, "saddlepoint"), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_saddlepoint_small$params, x_axis_trans = "log10", y_axis_trans = "log10")
+results_file_saddlepoint_small <- paste0(results_cache_dir, "/saddlepoint_small.rds")
+
+if(!file.exists(results_file_saddlepoint_small) ||
+   length(unique(readRDS(results_file_saddlepoint_small)$params$run)) < sbc_N_steps) {
+  cache_dir_saddlepoint_small <- paste0(fits_cache_dir,"/saddlepoint_small")
+  if(!dir.exists(cache_dir_saddlepoint_small)) {
+    dir.create(cache_dir_saddlepoint_small)
+  }
+  set.seed(seed_small)
+  sbc_res_saddlepoint_small <- sbc(model_sum_nb, generator(G = 1, N = small_N, "saddlepoint"), 
+                                   N_steps = sbc_N_steps, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_saddlepoint_small,
+                                   cluster_options = list(outfile = here("cache","cluster_out.txt")))
+  saveRDS(sbc_res_saddlepoint_small, results_file_saddlepoint_small)
+} else {
+  sbc_res_saddlepoint_small <- readRDS(results_file_saddlepoint_small)
+}
+
 summarise_sbc_diagnostics(sbc_res_saddlepoint_small)
-
 ```
 
-Median time - saddlepoint small, individual: 52.7035
+We see that some small number of runs ended with divergencies and/or max treedepth warnings. This is not great, but we will ingore it for now. The `n_eff` and `Rhat` diagnostics are okay. We also note that the model is quite slow - `r round(summarise_sbc_diagnostics(sbc_res_saddlepoint_small)$median_total_time)` seconds for just 10 observations is high.  
 
-Calibration and accuracy with moments approximation
+Let's look at the SBC histogram at two resolutions: 
 
 ```{r}
-sbc_res_moments_small <- sbc(model_sum_nb, generator(G = 1, N = 10, "moments"), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_moments_small$params, x_axis_trans = "log10", y_axis_trans = "log10")
-summarise_sbc_diagnostics(sbc_res_moments_small)
-
+plot_sbc_histogram(sbc_res_saddlepoint_small$params)
+plot_sbc_histogram(sbc_res_saddlepoint_small$params, binwidth = 2)
 ```
 
-# Sum of 21 NBs
+Here we would like to see a uniform distribution. The gray area is a rough 99% confidence interval, so very few bars should actually be outside this. While the histogram for $\mu_{G+1}$ looks OK, the consistent trend and few outliers for $\phi_{G+1}$ indicates that the approximation has some problems and consistently underestimates the true value.
 
-20 NBs are known (low means) and one NB is unknown (a prior large mean)
+Finally we can look at a scatter plot of true value vs. posterior median:
+
+```{r}
+plot_sbc_scatter(sbc_res_saddlepoint_small$params, x_axis_trans = "log10", y_axis_trans = "log10")
+```
+
+The blue line indicates perfect match (true value = posterior median)
+As in the above plot, we see that $\mu_{G+1}$ is usually inferred quite precisely, while the results for $\phi_{G+1}$ are diffuse and have a slight tendency to be below the perfect prediction line.
+
+We can now do the same for the method of moments approximation, starting with the diagnostics:
+
+```{r}
+results_file_moments_small <- paste0(results_cache_dir, "/moments_small.rds")
+
+if(!file.exists(results_file_moments_small) ||
+   length(unique(readRDS(results_file_moments_small)$params$run)) < sbc_N_steps) {
+  cache_dir_moments_small <- paste0(fits_cache_dir,"/moments_small")
+  if(!dir.exists(cache_dir_moments_small)) {
+    dir.create(cache_dir_moments_small)
+  }
+  set.seed(seed_small)
+  sbc_res_moments_small <- sbc(model_sum_nb, generator(G = 1, N = small_N, "moments"), 
+                                   N_steps = sbc_N_steps, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_moments_small)
+  saveRDS(sbc_res_moments_small, results_file_moments_small)
+} else {
+  sbc_res_moments_small <- readRDS(results_file_moments_small)
+}
+
+summarise_sbc_diagnostics(sbc_res_moments_small)
+```
+
+The histogram:
+
+```{r}
+plot_sbc_histogram(sbc_res_moments_small$params)
+plot_sbc_histogram(sbc_res_moments_small$params, binwidth = 2)
+```
+
+And the scatterplot:
+
+```{r}
+plot_sbc_scatter(sbc_res_moments_small$params, x_axis_trans = "log10", y_axis_trans = "log10")
+```
+
+
+## Sum of 21 NBs
+
+```{r}
+N_large <- 20
+seed_large <- 32157588
+```
+
+
+Further, we can check the case where there 20 known variables with low means and one NB is unknown with a large mean.
 
 Saddlepoint:
 
 ```{r}
-sbc_res_saddlepoint_large <- sbc(model_sum_nb, generator(G = 20, N = 20, "saddlepoint"), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_saddlepoint_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
-summarise_sbc_diagnostics(sbc_res_saddlepoint_large)
+results_file_saddlepoint_large <- paste0(results_cache_dir, "/saddlepoint_large.rds")
 
+if(!file.exists(results_file_saddlepoint_large) ||
+   length(unique(readRDS(results_file_saddlepoint_large)$params$run)) < sbc_N_steps) {
+  cache_dir_saddlepoint_large <- paste0(fits_cache_dir,"/saddlepoint_large")
+  if(!dir.exists(cache_dir_saddlepoint_large)) {
+    dir.create(cache_dir_saddlepoint_large)
+  }
+  set.seed(seed_large)
+  sbc_res_saddlepoint_large <- sbc(model_sum_nb, generator(G = 20, N = N_large, "saddlepoint"), 
+                                   N_steps = sbc_N_steps, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_saddlepoint_large)
+  saveRDS(sbc_res_saddlepoint_large, results_file_saddlepoint_large)
+} else {
+  sbc_res_saddlepoint_large <- readRDS(results_file_saddlepoint_large)
+}
+
+summarise_sbc_diagnostics(sbc_res_saddlepoint_large)
 ```
+
+The histogram:
+
+```{r}
+plot_sbc_histogram(sbc_res_saddlepoint_large$params)
+plot_sbc_histogram(sbc_res_saddlepoint_large$params, binwidth = 2)
+```
+
+```{r}
+plot_sbc_scatter(sbc_res_saddlepoint_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
+```
+
 
 Median time - saddlepoint large, individual: 259.2945
 
 Moments:
 
 ```{r}
-sbc_res_moments_large <- sbc(model_sum_nb, generator(G = 20, N = 20, "moments"), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_moments_large$params, x_axis_trans = "log10", y_axis_trans = "log10", plot_stat = "mean")
+results_file_moments_large <- paste0(results_cache_dir, "/moments_large.rds")
+
+if(!file.exists(results_file_moments_large) ||
+   length(unique(readRDS(results_file_moments_large)$params$run)) < sbc_N_steps) {
+  cache_dir_moments_large <- paste0(fits_cache_dir,"/moments_large")
+  if(!dir.exists(cache_dir_moments_large)) {
+    dir.create(cache_dir_moments_large)
+  }
+  set.seed(seed_large)
+  sbc_res_moments_large <- sbc(model_sum_nb, generator(G = 20, N = N_large, "moments"), 
+                                   N_steps = sbc_N_steps, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_moments_large)
+  saveRDS(sbc_res_moments_large, results_file_moments_large)
+} else {
+  sbc_res_moments_large <- readRDS(results_file_moments_large)
+}
+
 summarise_sbc_diagnostics(sbc_res_moments_large)
-
 ```
 
-# 10 large NBs
-
-9 known NBs, 1 unknown, all large ($log(\mu) \sim N(5,3)$). Here, the estimates start to be dominated by the prior.
-
-Saddlepoint:
 ```{r}
-sbc_res_saddlepoint_10_large <- sbc(model_sum_nb, generator(G = 9, N = 10, "saddlepoint", prior_mean_mus = 5, prior_sd_mus = 3), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_saddlepoint_10_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
-summarise_sbc_diagnostics(sbc_res_saddlepoint_10_large)
+plot_sbc_histogram(sbc_res_moments_large$params)
+plot_sbc_histogram(sbc_res_moments_large$params, binwidth = 2)
 ```
 
-
-Moments:
 ```{r}
-sbc_res_moments_10_large <- sbc(model_sum_nb, generator(G = 9, N = 10, "moments", prior_mean_mus = 5, prior_sd_mus = 3), N_steps = 100, control = list(adapt_delta = 0.95))
-plot_sbc_params(sbc_res_moments_10_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
-summarise_sbc_diagnostics(sbc_res_moments_10_large)
+plot_sbc_scatter(sbc_res_moments_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
+
+
+## Sum defined by series
+
+The first model is not very useful when `G` is large, because the posterior gets dominated by the prior. To better test what happens with large `G`, we instead us a single parameter to define all $\mu_i$ and $\phi_i$ as a geometric series, i.e. $\mu_i = \mu_{base} k^{(i - 1)}$ where $k$ is known while $\mu_{base}$ is the unknown parameter, similarly for $\phi_i$. The Stan code is:
+
+```{r, message = FALSE}
+series_model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb_series.stan")
+cat(series_model_file)
+series_model_sum_nb <- stan_model(series_model_file, isystem = here("static","post","2019-saddlepoint-approximation"))
+```
+
+The R code for simulation is then:
+
+```{r echo = TRUE}
+generator_series <- function(G, N, method = "saddlepoint", mu_prior_mean, mu_prior_sd, mu_series_coeff, phi_series_coeff) {
+  if(method == "saddlepoint") {
+    method_id = 0
+  } else if (method == "moments") {
+    method_id = 1
+  } else {
+    stop("Invalid method")
+  }
+  
+  function() {
+    mu <- rlnorm(1, mu_prior_mean, mu_prior_sd)
+    phi <- 1 / sqrt(abs(rnorm(1)))
+    all_mus <- mu * mu_series_coeff ^ (0:(G - 1))
+    all_phis <- phi * phi_series_coeff ^ (0:(G - 1))
+    sums <- array(-1, N)
+    for(n in 1:N) {
+      sums[n] <- sum(rnbinom(G, mu = all_mus, size = all_phis))
+    }
+    list(
+      observed = list(
+        N = N,
+        sums = sums,
+        G = G,
+        method = method_id,
+        mu_prior_mean = mu_prior_mean,
+        mu_prior_sd = mu_prior_sd,
+        mu_series_coeff = mu_series_coeff,
+        phi_series_coeff = phi_series_coeff
+      ),
+      true = list(
+        mu = mu,
+        phi = phi
+      )
+    )
+  }
+}
+```
+
+```{r}
+# Test single run, only for development
+# data <- generator_series(G = 30, N = 10, method = "saddlepoint", 
+#                                                      mu_prior_mean = 10, mu_prior_sd = 4,
+#                                                      mu_series_coeff = 0.75, phi_series_coeff = 0.9
+#                                                      )
+# fit <-  sampling(series_model_sum_nb, data = data$observed)
+# evaluate_all_params(rstan::extract(fit), data$true)
+```
+
+```{r}
+G_series <- 30
+N_series <- 10
+seed_series <- 8720045
+```
+
+
+
+```{r}
+results_file_saddlepoint_series <- paste0(results_cache_dir, "/saddlepoint_series.rds")
+
+if(!file.exists(results_file_saddlepoint_series) ||
+   length(unique(readRDS(results_file_saddlepoint_series)$params$run)) < sbc_N_steps) {
+  cache_dir_saddlepoint_series <- paste0(fits_cache_dir,"/saddlepoint_series")
+  if(!dir.exists(cache_dir_saddlepoint_series)) {
+    dir.create(cache_dir_saddlepoint_series)
+  }
+  set.seed(seed_series)
+  sbc_res_saddlepoint_series <- sbc(series_model_sum_nb, 
+                                    generator_series(G = G_series, N = N_series, method = "saddlepoint", 
+                                                     mu_prior_mean = 10, mu_prior_sd = 4,
+                                                     mu_series_coeff = 0.75, phi_series_coeff = 0.9
+                                                     ), 
+                                   N_steps = N, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_saddlepoint_series)
+  saveRDS(sbc_res_saddlepoint_series, results_file_saddlepoint_series)
+} else {
+  sbc_res_saddlepoint_series <- readRDS(results_file_saddlepoint_series)
+}
+
+summarise_sbc_diagnostics(sbc_res_saddlepoint_series)
+```
+
+
+
+```{r}
+plot_sbc_histogram(sbc_res_saddlepoint_series$params)
+plot_sbc_histogram(sbc_res_saddlepoint_series$params, binwidth = 2)
+```
+
+```{r}
+plot_sbc_scatter(sbc_res_saddlepoint_series$params, x_axis_trans = "log10", y_axis_trans = "log10")
+```
+
+
+```{r}
+results_file_moments_series <- paste0(results_cache_dir, "/moments_series.rds")
+
+if(!file.exists(results_file_moments_series) ||
+   length(unique(readRDS(results_file_moments_series)$params$run)) < sbc_N_steps) {
+  cache_dir_moments_series <- paste0(fits_cache_dir,"/moments_series")
+  if(!dir.exists(cache_dir_moments_series)) {
+    dir.create(cache_dir_moments_series)
+  }
+  set.seed(seed_series)
+  sbc_res_moments_series <- sbc(series_model_sum_nb, 
+                                    generator_series(G = G_series, N = N_series, method = "moments", 
+                                                     mu_prior_mean = 10, mu_prior_sd = 4,
+                                                     mu_series_coeff = 0.75, phi_series_coeff = 0.9
+                                                     ), 
+                                   N_steps = 5, 
+                                   control = list(adapt_delta = 0.95), 
+                                   cache_dir = cache_dir_moments_series)
+  saveRDS(sbc_res_moments_series, results_file_moments_series)
+} else {
+  sbc_res_moments_series <- readRDS(results_file_moments_series)
+}
+
+summarise_sbc_diagnostics(sbc_res_moments_series)
+```
+
+```{r}
+plot_sbc_histogram(sbc_res_moments_series$params)
+plot_sbc_histogram(sbc_res_moments_series$params, binwidth = 2)
+```
+
+
+```{r}
+plot_sbc_scatter(sbc_res_moments_series$params, x_axis_trans = "log10", y_axis_trans = "log10")
+
+```
+
 
 # Worked out saddlepoint approximations for other families
 
