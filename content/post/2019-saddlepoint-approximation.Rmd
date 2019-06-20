@@ -401,7 +401,7 @@ All the columns except for `median_total_time` represent proportion of fits that
 
 Let's look at the SBC histogram at two resolutions: 
 
-```{r, fig.height = 4}
+```{r}
 plot_sbc_histogram(sbc_res_saddlepoint_small$params)
 plot_sbc_histogram(sbc_res_saddlepoint_small$params, binwidth = 2)
 ```
