@@ -1,0 +1,597 @@
+---
+title: "Approximate Densities for Sums of Variables: Negative Binomials and Saddlepoint"
+date: 2019-06-20
+tags: ["R","Stan","Modelling"]
+draft: true
+output:
+  blogdown::html_page:
+    toc: true
+    toc_depth: 1
+---
+
+
+<div id="TOC">
+<ul>
+<li><a href="#the-approximation---big-picture">The Approximation - Big Picture</a></li>
+<li><a href="#saddlepoint-for-sum-of-nbs">Saddlepoint for Sum of NBs</a></li>
+<li><a href="#implementing-the-approximation-in-stan">Implementing the Approximation in Stan</a></li>
+<li><a href="#a-simple-baseline">A Simple Baseline</a></li>
+<li><a href="#eyeballing-masses">Eyeballing Masses</a></li>
+<li><a href="#evaluating-performance">Evaluating Performance</a></li>
+<li><a href="#summing-up">Summing up</a></li>
+<li><a href="#saddlepoint-approximations-for-other-families">Saddlepoint Approximations for Other Families</a></li>
+</ul>
+</div>
+
+<p>I recently needed to find the distribution of sum of non-identical but independent negative binomial (NB) random variables. Although for some special cases the <a href="https://stats.stackexchange.com/questions/45318/conditional-on-the-total-what-is-the-distribution-of-negative-binomials/354433#354433">sum is itself NB</a>, analytical solution is not feasible in the general case. However it turns out there is a very handy tool called “Saddlepoint approximation” that is useful whenever you need densities of sums of arbitrary random variables. In this post I use the sum of NBs as a case study on how to derive your own approximations for basically any sum of independent random variables, show some tricks needed to get the approximation working in Stan and evaluate it against simpler approximations. To give credit where credit is due, I was introduced to the saddlepoint method via <a href="https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318">Cross Validated answer on sum of Gamma variables</a>.</p>
+<p>Spoiler: it turns out the saddlepoint approximation is not that great for actual inference (at least for the cases I tested), but it is still a cool piece of math and I spent too much researching it to not show you this whole post.</p>
+<div id="the-approximation---big-picture" class="section level1">
+<h1>The Approximation - Big Picture</h1>
+<p>The saddlepoint approximation uses the <a href="https://en.wikipedia.org/wiki/Cumulant">cumulant-generating function</a> (CGF) of a distribution to compute an approximate density at a given point. The neat part about CGFs is that the CGF of the sum of several variables is the sum of the individual CGFs! And CGFs are easy to come by, because the CGF is just the log of the moment-generating function and Wikipedia helpfully lists moment-generating functions for almost all distributions. Figuring out the CGF of almost any sum variable (including variables from different families) is thus relatively straightforward.</p>
+<p>The actual method for approximating density <span class="math inline">\(f\)</span> at point <span class="math inline">\(x\)</span>, given the cumulant-generating function <span class="math inline">\(K\)</span>, and its first and second derivatives (<span class="math inline">\(K^\prime,K^{\prime\prime}\)</span>) is as follows:</p>
+<ol style="list-style-type: decimal">
+<li>find the saddlepoint <span class="math inline">\(s_x\)</span> by solving:</li>
+</ol>
+<p><span class="math display">\[
+K^\prime(s_x) = x
+\]</span></p>
+<p>Generally, there is no closed-form solution for <span class="math inline">\(s_x\)</span>, but since <span class="math inline">\(K(x)\)</span> is always convex, <span class="math inline">\(K^\prime\)</span> is always increasing, making it a nice target for numerical solutions. Still, since a different solution is needed for each <span class="math inline">\(x\)</span>, finding <span class="math inline">\(s_x\)</span> tends to be a computational bottleneck.</p>
+<ol start="2" style="list-style-type: decimal">
+<li>Once we have <span class="math inline">\(s_x\)</span>, we can approximate</li>
+</ol>
+<p><span class="math display">\[
+f(x) \simeq \frac1{\sqrt{2\pi K&#39;&#39;(s_x)}} \exp(K(s_x) - x s_x) 
+\]</span></p>
+<p>The nice thing about the saddlepoint approximation is that it can easily produce approximations for both discrete and continous densities, and doesn’t constrain the approximation to be normal (unlike Laplace approximation). One thing to note is that the saddlepoint approximation in the form above does not necessarily integrate to 1, so a renormalization might be needed if you are interested in the actual density. But to use in Stan, unnormalized density is all that’s needed.</p>
+</div>
+<div id="saddlepoint-for-sum-of-nbs" class="section level1">
+<h1>Saddlepoint for Sum of NBs</h1>
+<p>The moment-generating function of NB distribution parametrized by number of failures <span class="math inline">\(r\)</span> and probability of success <span class="math inline">\(p\)</span> is:</p>
+<p><span class="math display">\[
+M(t) = \left( \frac{1 - p}{1 - p e^t} \right)^r
+\]</span></p>
+<p>So, taking the log and summing over <span class="math inline">\(n\)</span> independent NB variables, the cumulant of sum of NB is:</p>
+<p><span class="math display">\[
+K(t) = \sum_{i=1}^{n} r_i \left[ \log(1-p_i) - \log(1 - p_i e^t) \right]
+\]</span></p>
+<p>We now transform to the more useful parametrization of NB via mean <span class="math inline">\(\mu\)</span> and precision <span class="math inline">\(\phi\)</span> (i.e. <span class="math inline">\(Var(X) = \mu + \frac{\mu^2}{\phi}\)</span>), where we have:</p>
+<p><span class="math display">\[
+r_i = \phi_i \\
+p_i = \frac{\mu_i}{\phi_i + \mu_i} \\
+K(t) = \sum_{i=1}^{n} \phi_i \left[ \log \frac{\phi_i}{\phi_i + \mu_i} - \log \left(1 - \frac{\mu_i e^t}{\phi_i + \mu_i} \right) \right]  = \\ 
+=\sum_{i=1}^{n} \phi_i \left[ \log(\phi_i) - \log(\phi_i + \mu_i ( 1 - e^t)) \right]
+\]</span></p>
+<p>Note that <span class="math inline">\(K(t)\)</span> does exist only when <span class="math inline">\(\forall i:\phi_i + \mu_i ( 1 - e^t) &gt; 0\)</span> this constrains <span class="math inline">\(t\)</span> such that:</p>
+<p><span class="math display">\[
+\begin{align}
+\tag{*}
+\forall i :  t &amp;&lt; log \left(\frac{\phi_i}{\mu_i} + 1 \right)
+\end{align}
+\]</span></p>
+<p>The first and second derivatives of <span class="math inline">\(K\)</span> are:</p>
+<p><span class="math display">\[
+K^\prime (t) = \sum_{i=1}^{n} \frac{\phi_i \mu_i e^t}{\phi_i + \mu_i (1 - e^t)} \\
+K^{\prime\prime} (t) = \sum_{i=1}^{n} \frac{\phi_i \mu_i (\phi_i + \mu_i) e^t}{(\phi_i + \mu_i (1 - e ^t))^2} \\
+\]</span></p>
+<p>It turns out that the saddlepoint <span class="math inline">\(s_x\)</span> is not defined when <span class="math inline">\(x = 0\)</span>, since the numerator of <span class="math inline">\(K^\prime(t)\)</span> is positive for all <span class="math inline">\(t\)</span> and the denominator has to be positive for <span class="math inline">\(K\)</span> to exist. But for this special case, the density can be easily computed, as <span class="math inline">\(f(0) = \prod_i P(X_i =0) = \prod_i NB(0 | \mu_i,\phi_i)\)</span>. The non-existence of the saddlepoint solution for boundaries of the domain is actually a recurring theme, as the existence of the solution is guaranteed only for the inner points, so it is useful to check for this when developing your approximations.</p>
+</div>
+<div id="implementing-the-approximation-in-stan" class="section level1">
+<h1>Implementing the Approximation in Stan</h1>
+<p>This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for <span class="math inline">\(s_x\)</span>, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in <a href="https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html"><code>algebra_solver</code></a> that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on <span class="math inline">\(s_x\)</span> from the equation <span class="math inline">\((*)\)</span> and <code>algebra_solver</code> turns out not to work when there are boundaries (even when initialized within the boundaries). Instead we use the same method Stan uses for bounds on parameters and solve for unbounded <span class="math inline">\(y_x\)</span> where:</p>
+<p><span class="math display">\[
+s_x = \min_i{log \left(\frac{\phi_i}{\mu_i} + 1 \right)} -e^{y_x} 
+\]</span></p>
+<p>So let us get our hands dirty and show some code, starting with how to write the saddlepoint equation in a way that the <code>algebra_solver</code> can handle. Since <span class="math inline">\(K^\prime\)</span> is always positive, we transform the equation to log scale - partly because we might have some big <span class="math inline">\(\sum\mu_i\)</span> out there and partly because it seems nice - I didn’t test the non-log version. So the equation we are actually solving for <span class="math inline">\(s_x\)</span> is:</p>
+<p><span class="math display">\[
+\log \sum_{i=1}^{n} \exp \left( \log\phi_i + \log \mu_i + s_x - \log(\phi_i + \mu_i - \mu_i \exp(s_x) \right) - x = 0
+\]</span>
+Translated into Stan we get:</p>
+<pre><code>  //Compute upper bound on s - there is a singularity at this point
+  real max_s(vector mus, vector phis) {
+    return min(log(phis ./ mus + 1));
+  }
+
+  //Transform from unbounded y to s upper-bounded by max_s
+  vector s_transform(vector y, vector mus, vector phis) {
+    return -exp(y) + max_s(mus, phis);
+  }
+
+  vector nb_sum_log_Kd_eq(vector y, vector theta, real[] x_r, int[] x_i) {
+    int G = rows(theta) / 2;
+    vector[G] mus = theta[1:G];
+    vector[G] phis = theta[(G + 1) : (2 * G)];
+
+    real s = s_transform(y, mus, phis)[1];
+    real sum_y = x_i[1];
+    vector[G] log_phis_mus = log(phis) + log(mus);
+    vector[G] phis_mus = phis + mus;
+    
+    real value = log_sum_exp(log_phis_mus + s - log(phis_mus - mus * exp(s))) - log(sum_y);
+    return to_vector({value});
+  }</code></pre>
+<p>Above, <code>y</code> are the unconstrained unknowns, which we transform via <code>s_transform</code> to the constrained space. Further we extract <span class="math inline">\(\mu_i\)</span> and <span class="math inline">\(\phi_i\)</span> from <code>theta</code> which can be parameters while <code>x_i</code> contains the observed sums (data). Since we have no real number data, <code>x_r</code> is ignored. The <code>algebra_solver</code> will try to find <code>y</code> such that <code>value</code> is 0 which is exactly when <code>s</code> is the solution to the saddlepoint equation.</p>
+<p>We use the <code>nb_sum_log_Kd_eq</code> function to compute the actual saddlepoint density:</p>
+<pre><code>  real neg_binomial_sum_saddlepoint_lpmf(int[] sum_y, vector mus, vector phis, real[] dummy_x_r) {
+    int N = size(sum_y);
+
+    int G = rows(mus);
+
+    // Solve the saddlepoint equation
+    vector[2 * G] solver_params = append_row(mus, phis);
+
+    vector[N] s_vec_raw;
+    vector[1] solver_guess = to_vector({0});
+    for(n in 1:N) {
+      if(sum_y[n] != 0) {
+        //Saddlepoint is defined only for non-zero values
+        s_vec_raw[n] = algebra_solver(nb_sum_log_Kd_eq, solver_guess, solver_params, dummy_x_r,  {sum_y[n]})[1];
+      } else {
+        //This will be ignored, but needed to pass to s_transform without problems
+        s_vec_raw[n] = 0;
+      }
+    }
+
+    {
+      vector[N] s = s_transform(s_vec_raw, mus, phis);
+      //Calculate the saddlepoint mass
+      vector[N] lpmf;
+      vector[G] log_mus = log(mus);
+
+      for(n in 1:N) {
+        if(sum_y[n] != 0) {
+          vector[G] log_denominator_s = log(phis + mus - mus * exp(s[n]));
+          real K_s = sum(phis .* (log(phis) - log_denominator_s));
+          real log_Kdd_s = log_sum_exp(log(phis) + log_mus + log(phis + mus) + s[n] - 2 * log_denominator_s);
+          lpmf[n] = -0.5 * (log(2*pi()) + log_Kdd_s) + K_s - s[n] * sum_y[n] ;
+        } else {
+          //For zero values, the probability is simply that of all NBs giving 0 
+          lpmf[n] = neg_binomial_2_lpmf(rep_array(0, G) | mus, phis);
+        }
+      }
+      
+      return sum(lpmf);
+    }
+  }</code></pre>
+<p>The above shows how the <code>algebra_solver</code> is called - we combine <span class="math inline">\(\mu_i\)</span> and <span class="math inline">\(\phi_i\)</span> as params, pass a guess (0 works great, so we don’t need to worry about details). The only weird part is <code>dummy_x_r</code> - I want it to be just an empty array, but it has to be of type <code>real</code> and has to be data. And I didn’t find a way to make the compiler understand that unless I pass <code>dummy_x_r</code> from outside as in</p>
+<pre><code>transformed data {
+  real dummy_x_r[0];
+}
+
+...
+
+model {
+  sums ~ neg_binomial_sum_lpmf(mus, phis, dummy_x_r);
+}</code></pre>
+</div>
+<div id="a-simple-baseline" class="section level1">
+<h1>A Simple Baseline</h1>
+<p>To assess, how useful the saddlepoint approximation is in practice, we’ll compare it to a straightforward application of <a href="https://en.wikipedia.org/wiki/Method_of_moments_(statistics)">Method of moments</a>. This is just a fancy name for choosing a distribution family and choosing it’s parameters so that mean, variance (and possibly higher moments) match those of the desired distribution. In case of NBs, when <span class="math inline">\(Y_i \sim NB(\mu_i, \phi_i)\)</span> then</p>
+<p><span class="math display">\[
+E \left(\sum Y_i \right) = \sum \mu_i \\
+Var \left(\sum Y_i \right) = \sum \left( \mu_i + \frac{\mu_i^2}{\phi_i} \right)
+\]</span></p>
+<p>Simply because both mean and variance are linear operators. Maybe sum of NBs isn’t that different from a NB distribution, so let’s approximate</p>
+<p><span class="math display">\[
+\sum Y_i \approx NB(\bar\mu, \bar\phi)
+\]</span></p>
+<p>Solving for <span class="math inline">\(\bar\mu\)</span> and <span class="math inline">\(\bar\phi\)</span> by matching the mean and variance of the approximate distribution gives:</p>
+<p><span class="math display">\[
+\bar \mu = \sum \mu_i \\
+\bar \phi = \frac{ \left(\sum \mu_i \right)^2 }{\sum \frac{\mu_i^2}{\phi_i}}
+\]</span></p>
+<p>This can be implemented very directly in Stan as:</p>
+<pre><code>  real neg_binomial_sum_moments_lpmf(int[] sum_y, vector mus, vector phis) {
+    real mu_approx = sum(mus);
+    real phi_approx = square(mu_approx) / sum(square(mus) ./ phis);
+
+    return neg_binomial_2_lpmf(sum_y | mu_approx, phi_approx);
+  }</code></pre>
+</div>
+<div id="eyeballing-masses" class="section level1">
+<h1>Eyeballing Masses</h1>
+<p>As a first look, we will see how well do both approximations match the empirical mass function - we simulate a lot of sums of NBs, bin the range of observed values and compute empirical mass as the proportion of the samples that fits in each bin. For the approximations, we sum the mass for all values belonging to the bins.</p>
+<p>The saddlepoint approximation improves notably over moments when the Fano factors of the summed variables are vastly different and we do not sum a large number of values, below we show mass and log mass for the case when <span class="math inline">\(\mu = \{800, 1600 \}\)</span> and <span class="math inline">\(\phi = \{10, 1 \}\)</span>:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/plot_approx_different-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/plot_approx_different-2.png" width="672" /></p>
+<p>It is visible that the saddlepoint mass tracks the empirical mass very tightly both in the bulk and in the tail (visible better on the log mass) - note that the tail of the empirical log mass is jittery due to low number of samples in the tail.</p>
+<p>On the other hand, when we sum a lot of variables which are not very different and/or when <span class="math inline">\(\phi_i\)</span> are large, the sum becomes normal-ish and both approximation work well - let us for example look at the case when <span class="math inline">\(\mu = \{50, 100, 1300, 2000 \}\)</span> and <span class="math inline">\(\phi = \{10, 10, 10, 10 \}\)</span>:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/plot_approx_similar-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/plot_approx_similar-2.png" width="672" /></p>
+<p>This gives us some intuition where to expect differences.</p>
+</div>
+<div id="evaluating-performance" class="section level1">
+<h1>Evaluating Performance</h1>
+<p>We evaluate the model using <a href="https://arxiv.org/abs/1804.06788">Simulation-based Calibration</a> (SBC). The main idea is that when I generate data exactly the way the model assumes, then for any <span class="math inline">\(c\)</span> the <span class="math inline">\(c\%\)</span> posterior interval should contain the true value an unobserved parameter in exactly <span class="math inline">\(c\%\)</span> of the cases. In other words the quantile in which the true value is found in the posterior distribution should be uniformly distributed. There are some caveats to this, read the paper for details.</p>
+<p>I am using my own implementation of SBC which is in my not very well documented, likely-never-on-CRAN package <a href="https://github.com/martinmodrak/rstanmodeldev"><code>rstanmodeldev</code></a>. We run 500 simulations for each of the test cases. If you want to see under the hood, the code for this post is available <a href="https://github.com/martinmodrak/blog/blob/master/content/post/2019-saddlepoint-approximation.Rmd">at the GitHub repo of this blog</a>.</p>
+<p>The first test case I will use is that I observe the sum of <span class="math inline">\(G+1\)</span> variables where I know <span class="math inline">\(\mu_i\)</span> and <span class="math inline">\(\phi_i\)</span> for <span class="math inline">\(i \in {1 .. G}\)</span> while <span class="math inline">\(\mu_{G+1}\)</span> and <span class="math inline">\(\phi_{G+1}\)</span> is unknown and has to be infered from <span class="math inline">\(N\)</span> observations of the sum.</p>
+<p>In all cases, both observed and unobserved <span class="math inline">\(\phi_i\)</span> are drawn following the <a href="https://statmodeling.stat.columbia.edu/2018/04/03/justify-my-love/">advice of Dan simpson</a>, i.e.:</p>
+<p><span class="math display">\[
+\phi_{raw} \sim HalfN(0, 1) \\
+\phi = \frac{1}{\sqrt{\phi_{raw}}}
+\]</span></p>
+<p>This is how the model looks-like in Stan ( <a href="/post/2019-saddlepoint-approximation/test_sum_nb.stan"><code>test_sum_nb.stan</code></a> ):</p>
+<pre><code>#include /sum_nb_functions.stan
+
+data {
+  int&lt;lower=1&gt; N;
+  int&lt;lower=0&gt; sums[N]; 
+  int&lt;lower=1&gt; G;
+  vector[G] mus;
+  vector[G] phis;
+
+  //0 - saddlepoint, 1 - method of moments
+  int&lt;lower = 0, upper = 1&gt; method;
+  real mu_prior_mean;
+  real&lt;lower = 0&gt; mu_prior_sd;
+  
+}
+
+transformed data {
+  real dummy_x_r[0];
+}
+
+parameters {
+  real log_extra_mu_raw;
+  real&lt;lower=0&gt; extra_phi_raw;
+}
+
+transformed parameters {
+  real&lt;lower=0&gt; extra_mu = exp(log_extra_mu_raw * mu_prior_sd + mu_prior_mean);
+  real&lt;lower=0&gt; extra_phi =  inv(sqrt(extra_phi_raw));
+}
+
+model {
+  vector[G + 1] all_mus = append_row(mus, to_vector({extra_mu}));
+  vector[G + 1] all_phis = append_row(phis, to_vector({extra_phi}));
+
+  if(method == 0) {
+    sums ~ neg_binomial_sum_saddlepoint_lpmf(all_mus, all_phis, dummy_x_r);
+  } else {
+    sums ~ neg_binomial_sum_moments_lpmf(all_mus, all_phis);
+  }
+
+  log_extra_mu_raw ~ normal(0, 1);
+  extra_phi_raw ~ normal(0,1);
+}</code></pre>
+<p>Most notably, the way the sum of NBs is implemented is given as data. The <a href="/post/2019-saddlepoint-approximation/sum_nb_functions.stan"><code>sum_nb_functions.stan</code></a> include contains the functions shown above.</p>
+<p>And this is an R method to generate simulated data - this is a function that given parameters of the observed data gives a function that on each call generates both <code>true</code> and <code>observed</code> data in a format that matches the Stan model:</p>
+<pre class="r"><code>generator &lt;- function(G, N, method = &quot;saddlepoint&quot;, observed_mean_mus, observed_sd_mus, mu_prior_mean, mu_prior_sd) {
+  if(method == &quot;saddlepoint&quot;) {
+    method_id = 0
+  } else if (method == &quot;moments&quot;) {
+    method_id = 1
+  } else {
+    stop(&quot;Invalid method&quot;)
+  }
+  
+  function() {
+    all_mus &lt;- rlnorm(G + 1, observed_mean_mus, observed_sd_mus)
+    all_mus[G + 1] &lt;- rlnorm(1, mu_prior_mean, mu_prior_sd)
+    all_phis &lt;- 1 / sqrt(abs(rnorm(G + 1)))
+    sums &lt;- array(-1, N)
+    for(n in 1:N) {
+      sums[n] &lt;- sum(rnbinom(G + 1, mu = all_mus, size = all_phis))
+    }
+    list(
+      observed = list(
+        N = N,
+        sums = sums,
+        G = G,
+        method = method_id,
+        mus = array(all_mus[1:G], G),
+        phis = array(all_phis[1:G], G),
+        mu_prior_mean = mu_prior_mean,
+        mu_prior_sd = mu_prior_sd
+      ),
+      true = list(
+        extra_mu = all_mus[G+1],
+        extra_phi = all_phis[G+1]
+      )
+    )
+  }
+}</code></pre>
+<div id="sum-of-two-nbs" class="section level2">
+<h2>Sum of Two NBs</h2>
+<p>Here we test a sum of two NBs - the means of both observed and unobserved NB are chosen randomly from LogNormal(5,3) We observe 10 sums in each run.</p>
+<div id="saddlepoint" class="section level3">
+<h3>Saddlepoint</h3>
+<p>First, let’s look at diagnostics for the saddlepoint approximation:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.04</td>
+<td align="right">0.004</td>
+<td align="right">0</td>
+<td align="right">50.0525</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+<p>All the columns except for <code>median_total_time</code> represent proportion of fits that have a problem with divergences/treedepth/lowe n_eff etc. We see that some small number of runs ended with divergencies. This is not great, but we will ingore it for now. The <code>n_eff</code> and <code>Rhat</code> diagnostics are okay. We also note that the model is quite slow - 50 seconds for just 10 observations is high.</p>
+<p>Let’s look at the SBC histogram at two resolutions:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-9-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-9-2.png" width="672" /></p>
+<p>Here we would like to see a uniform distribution. The gray area is a rough 99% confidence interval, so very few bars should actually be outside this. While the histogram for <span class="math inline">\(\mu_{G+1}\)</span> looks OK, the consistent trend and several outliers for <span class="math inline">\(\phi_{G+1}\)</span> indicates that the approximation has some problems and consistently underestimates the true value.</p>
+<p>Finally we can look at a scatter plot of true value vs. posterior median:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>The blue line indicates perfect match (true value = posterior median)
+As in the above plot, we see that <span class="math inline">\(\mu_{G+1}\)</span> is inferred quite precisely, especially for larger true values, while the results for <span class="math inline">\(\phi_{G+1}\)</span> are diffuse, often dominated by the priors (the prior density peaks at around 1.7) and have a slight tendency to be below the perfect prediction line. We also see that low true values of <span class="math inline">\(\mu_{G+1}\)</span> tend to be overestimated - this is not unexpected as when the observed <span class="math inline">\(\mu\)</span> is large and unobserved small it is hard to infer it’s exact value and the posterior is largely influenced by prior (which has large mean).</p>
+</div>
+<div id="moments" class="section level3">
+<h3>Moments</h3>
+<p>We can now do the same for the method of moments approximation, starting with the diagnostics:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.02</td>
+<td align="right">0</td>
+<td align="right">0</td>
+<td align="right">0.6775</td>
+<td align="right">0.016</td>
+<td align="right">0.016</td>
+</tr>
+</tbody>
+</table>
+<p>We see some small number of divergences and low n_eff and high Rhat (which go usually hand in hand). This is comparable to the saddlepoint case.</p>
+<p>The histogram:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-12-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-12-2.png" width="672" /></p>
+<p>The histrograms look very slightly worse than the saddlepoint approximation - although there is no consistent trend, more bars are outside the confidence interval or close to the border, indicating some issues, although I honestly don’t really understand what is going on.</p>
+<p>And the scatterplot, which looks quite similar to the saddlepoint version:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+</div>
+</div>
+<div id="sum-of-21-nbs" class="section level2">
+<h2>Sum of 21 NBs</h2>
+<p>Further, we can check the case where there are 20 known variables with low means and one NB is unknown with a large mean - we want the unobserved mean to have notable influence on the total outcome, hence we choose it to be larger. In particular, the observed means are drawn from LogNormal(2,1) and the mean to be inferred is drawn from LogNormal(5,3)</p>
+<div id="saddlepoint-1" class="section level3">
+<h3>Saddlepoint</h3>
+<p>Looking at the statisics, we see only very few divergences, but quite large median time:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.002</td>
+<td align="right">0</td>
+<td align="right">0</td>
+<td align="right">212.1805</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+<p>The histogram:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-16-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-16-2.png" width="672" /></p>
+<p>We see that especially for <span class="math inline">\(\phi_{G+1}\)</span> the results are discouraging with the true value frequently being in the low quantiles of the posterior.</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>The scatterplot is than quite similar to the previous cases.</p>
+</div>
+<div id="moments-1" class="section level3">
+<h3>Moments</h3>
+<p>The statistics for moments show short running time but a larger amount of convergence issues:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.016</td>
+<td align="right">0</td>
+<td align="right">0.008</td>
+<td align="right">1.0095</td>
+<td align="right">0.162</td>
+<td align="right">0.16</td>
+</tr>
+</tbody>
+</table>
+<p>The histograms:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-19-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-19-2.png" width="672" /></p>
+<p>The histograms hint at consistent underestimation of <span class="math inline">\(\mu_{G+1}\)</span> and overestimation of <span class="math inline">\(\phi_{G+1}\)</span>, problematic especially for <span class="math inline">\(\phi_{G+1}\)</span>.</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
+<p>Once again the scatter is similar, the only interesting feature are the few outliers for <span class="math inline">\(\mu_{G+1}\)</span> where the true value is large but the posterior median is very small. Those likely correspond to the divergent runs, but they cannot account for the full skew of the SBC histograms - this is more likely caused by the string of underestimated points just below the blue line on the top right.</p>
+</div>
+</div>
+<div id="sum-defined-by-series" class="section level2">
+<h2>Sum Defined by Series</h2>
+<p>The first model is not very useful when <code>G</code> is large, because the posterior gets dominated by the prior. To better test what happens with large <code>G</code>, we instead us a single parameter to define all <span class="math inline">\(\mu_i\)</span> and <span class="math inline">\(\phi_i\)</span> as a geometric series, i.e. <span class="math inline">\(\mu_i = \mu_{base} k^{(i - 1)}\)</span> where <span class="math inline">\(k\)</span> is known while <span class="math inline">\(\mu_{base}\)</span> is the unknown parameter, similarly for <span class="math inline">\(\phi_i\)</span>. The Stan code is:</p>
+<pre><code>#include /sum_nb_functions.stan
+
+data {
+  int&lt;lower=1&gt; N;
+  int&lt;lower=0&gt; sums[N]; 
+  int&lt;lower=1&gt; G;
+
+  //0 - saddlepoint, 1 - method of moments
+  int&lt;lower = 0, upper = 1&gt; method;
+  
+  real mu_prior_mean;
+  real&lt;lower = 0&gt; mu_prior_sd;
+  
+  real&lt;lower=0&gt; mu_series_coeff;
+  real&lt;lower=0&gt; phi_series_coeff;
+}
+
+transformed data {
+  real dummy_x_r[0];
+  vector[G] mu_coeffs;
+  vector[G] phi_coeffs;
+  
+  mu_coeffs[1] = 1;
+  phi_coeffs[1] = 1;
+  for(g in 2:G) {
+    mu_coeffs[g] = mu_coeffs[g - 1] * mu_series_coeff;
+    phi_coeffs[g] = phi_coeffs[g - 1] * phi_series_coeff;
+  }
+}
+
+parameters {
+  real log_mu_raw;
+  real&lt;lower=0&gt; phi_raw;
+}
+
+transformed parameters {
+  real&lt;lower=0&gt; mu = exp(log_mu_raw * mu_prior_sd + mu_prior_mean);
+  real&lt;lower=0&gt; phi =  inv(sqrt(phi_raw));
+}
+
+model {
+  vector[G] all_mus = mu * mu_coeffs;
+  vector[G] all_phis = phi * phi_coeffs;
+
+  if(method == 0) {
+    sums ~ neg_binomial_sum_saddlepoint_lpmf(all_mus, all_phis, dummy_x_r);
+  } else {
+    sums ~ neg_binomial_sum_moments_lpmf(all_mus, all_phis);
+  }
+
+  log_mu_raw ~ normal(0, 1);
+  phi_raw ~ normal(0,1);
+}</code></pre>
+<p>The R code for simulation is then:</p>
+<pre class="r"><code>generator_series &lt;- function(G, N, method = &quot;saddlepoint&quot;, mu_prior_mean, mu_prior_sd, mu_series_coeff, phi_series_coeff) {
+  if(method == &quot;saddlepoint&quot;) {
+    method_id = 0
+  } else if (method == &quot;moments&quot;) {
+    method_id = 1
+  } else {
+    stop(&quot;Invalid method&quot;)
+  }
+  
+  function() {
+    mu &lt;- rlnorm(1, mu_prior_mean, mu_prior_sd)
+    phi &lt;- 1 / sqrt(abs(rnorm(1)))
+    all_mus &lt;- mu * mu_series_coeff ^ (0:(G - 1))
+    all_phis &lt;- phi * phi_series_coeff ^ (0:(G - 1))
+    sums &lt;- array(-1, N)
+    for(n in 1:N) {
+      sums[n] &lt;- sum(rnbinom(G, mu = all_mus, size = all_phis))
+    }
+    list(
+      observed = list(
+        N = N,
+        sums = sums,
+        G = G,
+        method = method_id,
+        mu_prior_mean = mu_prior_mean,
+        mu_prior_sd = mu_prior_sd,
+        mu_series_coeff = mu_series_coeff,
+        phi_series_coeff = phi_series_coeff
+      ),
+      true = list(
+        mu = mu,
+        phi = phi
+      )
+    )
+  }
+}</code></pre>
+<p>In the following we draw <span class="math inline">\(\mu_{base}\)</span> from LogNormal(8, 3) and use <code>mu_series_coeff =</code> 0.75 and <code>phi_series_coeff</code> = 0.9.</p>
+<div id="saddlepoint-2" class="section level3">
+<h3>Saddlepoint</h3>
+<p>Once again let’s look at the diagnostics for saddlepoint approximation:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.054</td>
+<td align="right">0</td>
+<td align="right">0</td>
+<td align="right">155.9085</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+<p>We see quite a few divergences, but I didn’t investigate them in detail. The SBC histograms follow:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-27-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-27-2.png" width="672" /></p>
+<p>The histrograms hint at some problems for <span class="math inline">\(\mu\)</span>.</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+<p>The scatterplot shows that the estimation is quite reasonable for both <span class="math inline">\(\mu\)</span> and <span class="math inline">\(\phi\)</span> - definitely better than the previous model, as we got rid of the cases where the data do not identify the true values well.</p>
+</div>
+<div id="moments-2" class="section level3">
+<h3>Moments</h3>
+<p>The diagnostics and plots for method of moments is:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="right">has_divergence</th>
+<th align="right">has_treedepth</th>
+<th align="right">has_low_bfmi</th>
+<th align="right">median_total_time</th>
+<th align="right">low_neff</th>
+<th align="right">high_Rhat</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">0.042</td>
+<td align="right">0.006</td>
+<td align="right">0.004</td>
+<td align="right">0.7445</td>
+<td align="right">0.004</td>
+<td align="right">0.002</td>
+</tr>
+</tbody>
+</table>
+<p>We see a bunch of problems, comparable to the saddlepoint version. Let’s look at the SBC histograms:</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-30-1.png" width="672" /><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-30-2.png" width="672" /></p>
+<p>And those are surprisingly nice, showing no clear trend or outliers!</p>
+<p><img src="/post/2019-saddlepoint-approximation_files/figure-html/unnamed-chunk-31-1.png" width="672" /></p>
+<p>The scatterplot is very similar to the saddlepoint case.</p>
+</div>
+</div>
+</div>
+<div id="summing-up" class="section level1">
+<h1>Summing up</h1>
+<p>We see that in the regimes we tested, the saddlepoint approximation for sum of negative binomials provides somewhat better inferences for small number of variables at the cost of much increased computation times. For sums of large number of variables, it may even be worse than the moments method. So it is probably not very practical unless you have few variables you need that extra bit of precision. But it is a neat mathematical trick and of interest on its own. It is also possible that for some low-mean regimes the difference is bigger.</p>
+</div>
+<div id="saddlepoint-approximations-for-other-families" class="section level1">
+<h1>Saddlepoint Approximations for Other Families</h1>
+<p>If you want to use saddlepoint approximation for other than NB variables, but don’t want to do the math on your own, there are some worked out on the Internet:</p>
+<ul>
+<li>Sum of Gamma variables: <a href="https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318">Answer on Cross Validated</a></li>
+<li>Sum of binomials: <a href="https://arxiv.org/abs/1712.01410">Liu &amp; Quertermous: Approximating the Sum of Independent Non-Identical Binomial Random Variables</a></li>
+</ul>
+<p>Thanks for reading!</p>
+</div>

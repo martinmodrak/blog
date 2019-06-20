@@ -1,6 +1,6 @@
 ---
 title: "Approximate Densities for Sums of Variables: Negative Binomials and Saddlepoint"
-date: 2019-06-19
+date: 2019-06-20
 tags: ["R","Stan","Modelling"]
 draft: true
 output:
@@ -16,7 +16,7 @@ library(here)
 library(tidyverse)
 library(cowplot)
 library(rstanmodeldev) #My custom package for SBC and related stuff, can be found at https://github.com/martinmodrak/rstanmodeldev
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, fig.height = 3)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
 
@@ -37,7 +37,7 @@ sbc_cores <- parallel::detectCores() - 1
 
 I recently needed to find the distribution of sum of non-identical but independent negative binomial (NB) random variables. Although for some special cases the [sum is itself NB](https://stats.stackexchange.com/questions/45318/conditional-on-the-total-what-is-the-distribution-of-negative-binomials/354433#354433), analytical solution is not feasible in the general case. However it turns out there is a very handy tool called "Saddlepoint approximation" that is useful whenever you need densities of sums of arbitrary random variables. In this post I use the sum of NBs as a case study on how to derive your own approximations for basically any sum of independent random variables, show some tricks needed to get the approximation working in Stan and evaluate it against simpler approximations. To give credit where credit is due, I was introduced to the saddlepoint method via [Cross Validated answer on sum of Gamma variables](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318).
 
-Spoiler: it turns out the saddlepoint approximation is only slightly better than a simpler alternative.
+Spoiler: it turns out the saddlepoint approximation is not that great for actual inference (at least for the cases I tested), but it is still a cool piece of math and I spent too much researching it to not show you this whole post. 
 
 # The Approximation - Big Picture
 
@@ -51,7 +51,7 @@ $$
 K^\prime(s_x) = x
 $$
 
-Generally, there is no closed-form solution for $s_x$, but since $K(x)$ is always convex, $K^\prime$ is always increasing, making it a nice target for numerical solutions. Still, since a different solution is needed for each $x$, finding $s$ tends to be a computational bottleneck.
+Generally, there is no closed-form solution for $s_x$, but since $K(x)$ is always convex, $K^\prime$ is always increasing, making it a nice target for numerical solutions. Still, since a different solution is needed for each $x$, finding $s_x$ tends to be a computational bottleneck.
 
 2) Once we have $s_x$, we can approximate
 
@@ -104,7 +104,7 @@ It turns out that the saddlepoint $s_x$ is not defined when $x = 0$, since the n
 
 # Implementing the Approximation in Stan
 
-This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for $s_x$, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in [`algebra_solver`](https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html) that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on $s_x$ from the equation $(*)$ and `algebra_solver` turns out not to work when there are boundaries (even when initialized withing the boundaries). Instead we use the same method Stan uses for bounds on parameters and solve for unbounded $y_x$ where:
+This has all been a nice math excercise, but how can we translate that into a piece of code we could use? The only problematic part is solving for $s_x$, once we have it, the rest is a simple math that Stan will digest easily. Luckily, Stan has the built-in [`algebra_solver`](https://mc-stan.org/docs/2_19/functions-reference/functions-algebraic-solver.html) that can solve equations AND provide derivatives of the solution wrt. parameters. There is only a minor problem - we have an upper bound on $s_x$ from the equation $(*)$ and `algebra_solver` turns out not to work when there are boundaries (even when initialized within the boundaries). Instead we use the same method Stan uses for bounds on parameters and solve for unbounded $y_x$ where:
 
 $$
 s_x = \min_i{log \left(\frac{\phi_i}{\mu_i} + 1 \right)} -e^{y_x} 
@@ -125,13 +125,13 @@ cat(paste0(functions_lines[2:24], collapse = "\n"))
 
 Above, `y` are the unconstrained unknowns, which we transform via `s_transform` to the constrained space. Further we extract $\mu_i$ and $\phi_i$ from `theta` which can be parameters while `x_i` contains the observed sums (data). Since we have no real number data, `x_r` is ignored. The `algebra_solver` will try to find `y` such that `value` is 0 which is exactly when `s` is the solution to the saddlepoint equation.
 
-We use the `nb_sum_log_Kd_eq` to compute the actual saddlepoint density:
+We use the `nb_sum_log_Kd_eq` function to compute the actual saddlepoint density:
 
 ```{r, comment=NA}
 cat(paste0(functions_lines[26:67], collapse = "\n"))
 ```
 
-The above shows how the `algebra_solver` is called (I've kept the non-vectorized call in the comments for reference) - we combine $\mu_i$ and $\phi_i$ as params, pass a guess (0 works great, so we don't need to worry about details). The only weird part is `dummy_x_r` - I want it to be just an empty array, but it has to be of type `real` and has to be data. And I didn't find a way to make the compiler understand that unless I pass `dummy_x_r` from outside as in
+The above shows how the `algebra_solver` is called - we combine $\mu_i$ and $\phi_i$ as params, pass a guess (0 works great, so we don't need to worry about details). The only weird part is `dummy_x_r` - I want it to be just an empty array, but it has to be of type `real` and has to be data. And I didn't find a way to make the compiler understand that unless I pass `dummy_x_r` from outside as in
 
 ```
 transformed data {
@@ -178,8 +178,9 @@ cat(paste0(functions_lines[69:74], collapse = "\n"))
 
 As a first look, we will see how well do both approximations match the empirical mass function - we simulate a lot of sums of NBs, bin the range of observed values and compute empirical mass as the proportion of the samples that fits in each bin. For the approximations, we sum the mass for all values belonging to the bins.
 
-```{r plot_approx_fun, cache=TRUE }
-expose_stan_functions(here("static","post","2019-saddlepoint-approximation","sum_nb_functions.stan"))
+```{r plot_approx_fun, message=FALSE, results="hide", cache = TRUE}
+
+expose_stan_functions(here("static","post","2019-saddlepoint-approximation","sum_nb_functions.stan"), show_compiler_warnings = FALSE)
 
 ## from http://tr.im/hH5A
 logsumexp <- function (x) {
@@ -188,13 +189,8 @@ logsumexp <- function (x) {
 }
 
 plot_approximation_densities <- function(means, phis, log_scale) {
-#Choose how the means are generated and how many NB variables are there
-  
   n_means = length(means)
 
-    #data = generate_nb_sum(10000, n_means, phi, means = rlnorm(n_means, 8, 5))
-  #n_means = 10
-  
   N_sums <- 1e5
   sums = numeric(N_sums)
   for(n in 1:N_sums) {
@@ -272,7 +268,8 @@ The saddlepoint approximation improves notably over moments when the Fano factor
 plot_approximation_densities(means_ex1, phis_ex1, log_scale = FALSE)
 plot_approximation_densities(means_ex1, phis_ex1, log_scale = TRUE)
 ```
-It is visible that the saddlepoint mass track the empirical mass very tightly both in the bulk and in the tail (visible better on the log mass) - note that the tail of the empirical log mass is jittery due to low number of samples in the tail.
+
+It is visible that the saddlepoint mass tracks the empirical mass very tightly both in the bulk and in the tail (visible better on the log mass) - note that the tail of the empirical log mass is jittery due to low number of samples in the tail.
 
 On the other hand, when we sum a lot of  variables which are not very different and/or when $\phi_i$ are large, the sum becomes normal-ish and both approximation work well - let us for example look at the case when $\mu = \{`r paste0(means_ex2, collapse = ", ")` \}$ and $\phi = \{`r paste0(phis_ex2, collapse = ", ")` \}$:
 
@@ -286,18 +283,18 @@ This gives us some intuition where to expect differences.
 
 # Evaluating Performance
 
-```{r, message = FALSE}
+```{r, message = FALSE, results = "hide", cache = TRUE}
 model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb.stan")
 model_sum_nb <- stan_model(model_file, isystem = here("static","post","2019-saddlepoint-approximation"))
 ```
 
-We evaluate the model using [Simulation-based Calibration](https://arxiv.org/abs/1804.06788) (SBC). The main idea is that when I generate data exactly the way the model assumes, then for any $c$ the $c\%$ posterior interval should contain the true value an unobserved parameter in exactly $c\%$ of the cases. In other words the quantile in which the true value is found should be uniformly distributed. There are some caveats to this, read the paper for details.
+We evaluate the model using [Simulation-based Calibration](https://arxiv.org/abs/1804.06788) (SBC). The main idea is that when I generate data exactly the way the model assumes, then for any $c$ the $c\%$ posterior interval should contain the true value an unobserved parameter in exactly $c\%$ of the cases. In other words the quantile in which the true value is found in the posterior distribution should be uniformly distributed. There are some caveats to this, read the paper for details.
 
 I am using my own implementation of SBC which is in my not very well documented, likely-never-on-CRAN package [`rstanmodeldev`](https://github.com/martinmodrak/rstanmodeldev). We run `r sbc_N_steps` simulations for each of the test cases. If you want to see under the hood, the code for this post is available [at the GitHub repo of this blog](https://github.com/martinmodrak/blog/blob/master/content/post/2019-saddlepoint-approximation.Rmd).
 
 The first test case I will use is that I observe the sum of $G+1$ variables where I know $\mu_i$ and $\phi_i$ for $i \in {1 .. G}$ while $\mu_{G+1}$ and $\phi_{G+1}$ is unknown and has to be infered from $N$ observations of the sum.
 
-In all cases, both observed and unobserved $phi_i$ are drawn following the [advice of Dan simpson](https://statmodeling.stat.columbia.edu/2018/04/03/justify-my-love/), i.e.:
+In all cases, both observed and unobserved $\phi_i$ are drawn following the [advice of Dan simpson](https://statmodeling.stat.columbia.edu/2018/04/03/justify-my-love/), i.e.:
 
 $$
 \phi_{raw} \sim HalfN(0, 1) \\
@@ -366,7 +363,7 @@ seed_small <- 68752245 #I use the same seed so I evaluate on exactly the same da
 ```
 
 
-Here we test a sum of two NBs - the means of the unobserved NB is chosen randomly from LogNormal(`r mu_prior_mean_small`,`r mu_prior_sd_small`) and the observed mean is chosen from LogNormal(`r observed_mean_mus_small`,`r observed_sd_mus_small`). The observed mean is deliberately smaller on average as when the observed mean is much larger than the mean to be inferred, there is little to be learned about the unobserved mean except that is not big and prior dominates making the case uninteresting. We observe `r small_N` sums.
+Here we test a sum of two NBs - the means of both observed and unobserved NB are chosen randomly from LogNormal(`r mu_prior_mean_small`,`r mu_prior_sd_small`) We observe `r small_N` sums in each run.
 
 ### Saddlepoint
 
@@ -398,19 +395,19 @@ if(!file.exists(results_file_saddlepoint_small) ||
   sbc_res_saddlepoint_small <- readRDS(results_file_saddlepoint_small)
 }
 
-summarise_sbc_diagnostics(sbc_res_saddlepoint_small)
+summarise_sbc_diagnostics(sbc_res_saddlepoint_small) %>% kable()
 ```
 
 All the columns except for `median_total_time` represent proportion of fits that have a problem with divergences/treedepth/lowe n_eff etc. We see that some small number of runs ended with divergencies. This is not great, but we will ingore it for now. The `n_eff` and `Rhat` diagnostics are okay. We also note that the model is quite slow - `r round(summarise_sbc_diagnostics(sbc_res_saddlepoint_small)$median_total_time)` seconds for just 10 observations is high.  
 
 Let's look at the SBC histogram at two resolutions: 
 
-```{r}
+```{r, fig.height = 4}
 plot_sbc_histogram(sbc_res_saddlepoint_small$params)
 plot_sbc_histogram(sbc_res_saddlepoint_small$params, binwidth = 2)
 ```
 
-Here we would like to see a uniform distribution. The gray area is a rough 99% confidence interval, so very few bars should actually be outside this. While the histogram for $\mu_{G+1}$ looks OK, the consistent trend and few outliers for $\phi_{G+1}$ indicates that the approximation has some problems and consistently underestimates the true value.
+Here we would like to see a uniform distribution. The gray area is a rough 99% confidence interval, so very few bars should actually be outside this. While the histogram for $\mu_{G+1}$ looks OK, the consistent trend and several outliers for $\phi_{G+1}$ indicates that the approximation has some problems and consistently underestimates the true value.
 
 Finally we can look at a scatter plot of true value vs. posterior median:
 
@@ -451,7 +448,7 @@ if(!file.exists(results_file_moments_small) ||
   sbc_res_moments_small <- readRDS(results_file_moments_small)
 }
 
-summarise_sbc_diagnostics(sbc_res_moments_small)
+summarise_sbc_diagnostics(sbc_res_moments_small)  %>% kable()
 ```
 
 We see some small number of divergences and low n_eff and high Rhat (which go usually hand in hand). This is comparable to the saddlepoint case.
@@ -484,7 +481,7 @@ observed_mean_sd_large <- 1
 ```
 
 
-Further, we can check the case where there are 20 known variables with low means and one NB is unknown with a large mean - once again we want the unobserved mean to have notable influence on the total outcome, hence we choose it to be larger. In particular, the observed means are drawn from LogNormal(`r observed_mean_mus_large`,`r observed_mean_sd_large`) and the mean to be inferred is drawn from LogNormal(`r mu_prior_mean_large`,`r mu_prior_sd_large`)
+Further, we can check the case where there are 20 known variables with low means and one NB is unknown with a large mean - we want the unobserved mean to have notable influence on the total outcome, hence we choose it to be larger. In particular, the observed means are drawn from LogNormal(`r observed_mean_mus_large`,`r observed_mean_sd_large`) and the mean to be inferred is drawn from LogNormal(`r mu_prior_mean_large`,`r mu_prior_sd_large`)
 
 ### Saddlepoint
 
@@ -516,7 +513,7 @@ if(!file.exists(results_file_saddlepoint_large) ||
   sbc_res_saddlepoint_large <- readRDS(results_file_saddlepoint_large)
 }
 
-summarise_sbc_diagnostics(sbc_res_saddlepoint_large)
+summarise_sbc_diagnostics(sbc_res_saddlepoint_large)  %>% kable()
 ```
 
 The histogram:
@@ -532,7 +529,7 @@ We see that especially for $\phi_{G+1}$ the results are discouraging with the tr
 plot_sbc_scatter(sbc_res_saddlepoint_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
 
-The scatterplot is than qutie similar to the previous cases.
+The scatterplot is than quite similar to the previous cases.
 
 ### Moments
 
@@ -563,7 +560,7 @@ if(!file.exists(results_file_moments_large) ||
   sbc_res_moments_large <- readRDS(results_file_moments_large)
 }
 
-summarise_sbc_diagnostics(sbc_res_moments_large)
+summarise_sbc_diagnostics(sbc_res_moments_large)  %>% kable()
 ```
 
 The histograms:
@@ -579,16 +576,20 @@ The histograms hint at consistent underestimation of $\mu_{G+1}$ and overestimat
 plot_sbc_scatter(sbc_res_moments_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
 
-Once again the scatter is simaler, the only interesting feature are the few outliers for $\mu_{G+1}$ where the true value is large but the posterior median is very small. Those likely correspond to the divergent runs, but they cannot account for the full skew of the SBC histograms - this is more likely caused by the string of underestimated points just below the blue line on the top right.
+Once again the scatter is similar, the only interesting feature are the few outliers for $\mu_{G+1}$ where the true value is large but the posterior median is very small. Those likely correspond to the divergent runs, but they cannot account for the full skew of the SBC histograms - this is more likely caused by the string of underestimated points just below the blue line on the top right.
 
 ## Sum Defined by Series
 
 The first model is not very useful when `G` is large, because the posterior gets dominated by the prior. To better test what happens with large `G`, we instead us a single parameter to define all $\mu_i$ and $\phi_i$ as a geometric series, i.e. $\mu_i = \mu_{base} k^{(i - 1)}$ where $k$ is known while $\mu_{base}$ is the unknown parameter, similarly for $\phi_i$. The Stan code is:
 
-```{r, message = FALSE}
+```{r, comment=NA}
 series_model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb_series.stan")
 cat(paste0(readLines(series_model_file), collapse = "\n"))
+```
+
+```{r, message = FALSE, results = "hide", cache = TRUE}
 series_model_sum_nb <- stan_model(series_model_file, isystem = here("static","post","2019-saddlepoint-approximation"))
+
 ```
 
 The R code for simulation is then:
@@ -686,7 +687,7 @@ if(!file.exists(results_file_saddlepoint_series) ||
   sbc_res_saddlepoint_series <- readRDS(results_file_saddlepoint_series)
 }
 
-summarise_sbc_diagnostics(sbc_res_saddlepoint_series)
+summarise_sbc_diagnostics(sbc_res_saddlepoint_series)  %>% kable()
 ```
 
 We see quite a few divergences, but I didn't investigate them in detail. The SBC histograms follow:
@@ -736,7 +737,7 @@ if(!file.exists(results_file_moments_series) ||
   sbc_res_moments_series <- readRDS(results_file_moments_series)
 }
 
-summarise_sbc_diagnostics(sbc_res_moments_series)
+summarise_sbc_diagnostics(sbc_res_moments_series)  %>% kable()
 ```
 
 We see a bunch of problems, comparable to the saddlepoint version. Let's look at the SBC histograms:
@@ -759,9 +760,11 @@ The scatterplot is very similar to the saddlepoint case.
 
 We see that in the regimes we tested, the saddlepoint approximation for sum of negative binomials provides  somewhat better inferences for small number of variables at the cost of much increased computation times. For sums of large number of variables, it may even be worse than the moments method. So it is probably not very practical unless you have few variables you need that extra bit of precision. But it is a neat mathematical trick and of interest on its own. It is also possible that for some low-mean regimes the difference is bigger.
 
-# Worked out saddlepoint approximations for other families
+# Saddlepoint Approximations for Other Families
 
 If you want to use saddlepoint approximation for other than NB variables, but don't want to do the math on your own, there are some worked out on the Internet:
 
 - Sum of Gamma variables: [Answer on Cross Validated](https://stats.stackexchange.com/questions/72479/generic-sum-of-gamma-random-variables/137318#137318)
 - Sum of binomials: [Liu & Quertermous: Approximating the Sum of Independent Non-Identical Binomial Random Variables](https://arxiv.org/abs/1712.01410)
+
+Thanks for reading!
