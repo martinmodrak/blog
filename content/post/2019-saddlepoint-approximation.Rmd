@@ -40,7 +40,7 @@ Spoiler: it turns out the saddlepoint approximation is not that great for actual
 
 # The Approximation - Big Picture
 
-The saddlepoint approximation uses the [cumulant-generating function](https://en.wikipedia.org/wiki/Cumulant) (CGF) of a distribution to compute an approximate density at a given point. The neat part about CGFs is that the CGF of the sum of several variables is the sum of the individual CGFs! And CGFs are easy to come by, because the CGF is just the log of the moment-generating function and Wikipedia helpfully lists moment-generating functions for almost all distributions. Figuring out the CGF of almost any sum variable (including variables from different families) is thus relatively straightforward. 
+The saddlepoint approximation uses the [cumulant-generating function](https://en.wikipedia.org/wiki/Cumulant) (CGF) of a distribution to compute an approximate density at a given point. The neat part about CGFs is that the CGF of the sum of several variables is the sum of the individual CGFs! And CGFs are easy to come by, because the CGF is just the log of the moment-generating function and Wikipedia helpfully lists moment-generating functions for almost all distributions. Figuring out the CGF of almost any sum variable (including variables from different families) is thus relatively straightforward. The CGF can also easily be derived for [general linear combinations of random variables](http://mathworld.wolfram.com/Cumulant-GeneratingFunction.html).
 
 The actual method for approximating density $f$ at point $x$, given the cumulant-generating function $K$, and its first and second derivatives ($K^\prime,K^{\prime\prime}$) is as follows:
 

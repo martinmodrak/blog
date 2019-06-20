@@ -21,7 +21,7 @@ kable(kathryn_results)
 
 *Full source of this post is available at [this blog's Github repo](https://github.com/martinmodrak/blog/blob/master/content/post/2018-02-02-stan-vs-inla.Rmd). Keep in mind that installing RStan is unfortunately not as straightforward as running install.packages. Please consult https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started if you don't have RStan already installed.*
 
-##The model
+## The model
 
 The model we are interested in is a simple GLM with partial pooling of a random effect:
 ```
@@ -30,7 +30,7 @@ log(mu_i) ~ alpha + beta * x_i + nu_i
 nu_i ~ normal(0, tau_nu)
 ```
 
-##The comparison
+## The comparison
 
 Let's setup our libraries.
 ```{r setup,message=FALSE,warning=FALSE}
@@ -236,7 +236,7 @@ if(run_inla) {
 ```
 
 
-###Checking inferences
+### Checking inferences
 Here we see side-by-side comparisons of the inferences and they seem pretty comparable between Stan and Inla:
 
 ```{r results='asis', warning=FALSE}
@@ -251,7 +251,7 @@ for(N_to_show in N_values) {
 ```
 
 
-###Summary of the timing
+### Summary of the timing
 
 You can see that Stan keeps reasonable runtimes for longer time than JAGS in the original blog post, but INLA is still way faster. Also Kathryn got probably very lucky with her seed for N = 25 000, as her INLA run completed very quickly. With my (few) tests, INLA always took at least several minutes for N = 25 000. It may mean that Kathryn's JAGS time is also too short.
 ```{r results='asis'}
@@ -261,7 +261,7 @@ kable(merge.data.frame(my_results, kathryn_results, by = "N"))
 
 You could obviously do multiple runs to reduce uncertainty etc., but this post has already taken too much time of mine, so this will be left to others.
 
-##Testing  quality of the results
+## Testing  quality of the results
 
 I also had a hunch that maybe INLA is less precise than Stan, but that turned out to be based on an error. Thus, without much commentary, I put here my code to test this. Basically, I modify the random data generator to actually draw from priors (those priors are quite constrained to provide similar values of alpha, beta nad tau_nu as in the original). I than give both algorithms the knowledge of these priors. I compute both difference between true parameters and a point estimate (mean) and quantiles of the posterior distribution where the true parameter is found. If the algorithms give the best possible estimates, the distribution of such quantiles should be uniform over (0,1). Turns out INLA and Stan give almost exactly the same results for almost all runs and the differences in quality are (for this particular model) negligible.
 
