@@ -15,7 +15,7 @@ library(knitr)
 library(here)
 library(tidyverse)
 library(cowplot)
-library(rstanmodeldev)
+library(rstanmodeldev) #My custom package for SBC and related stuff, can be found at https://github.com/martinmodrak/rstanmodeldev
 knitr::opts_chunk$set(echo = FALSE)
 options(mc.cores = parallel::detectCores())
 rstan_options(auto_write = TRUE)
@@ -308,7 +308,7 @@ $$
 This is how the model looks-like in Stan ( [`test_sum_nb.stan`](/post/2019-saddlepoint-approximation/test_sum_nb.stan) ):
 
 ```{r, comment=NA}
-cat(file = model_file)
+cat(paste0(readLines(model_file), collapse = "\n"))
 ```
 
 
@@ -401,7 +401,7 @@ if(!file.exists(results_file_saddlepoint_small) ||
 summarise_sbc_diagnostics(sbc_res_saddlepoint_small)
 ```
 
-We see that some small number of runs ended with divergencies. This is not great, but we will ingore it for now. The `n_eff` and `Rhat` diagnostics are okay. We also note that the model is quite slow - `r round(summarise_sbc_diagnostics(sbc_res_saddlepoint_small)$median_total_time)` seconds for just 10 observations is high.  
+All the columns except for `median_total_time` represent proportion of fits that have a problem with divergences/treedepth/lowe n_eff etc. We see that some small number of runs ended with divergencies. This is not great, but we will ingore it for now. The `n_eff` and `Rhat` diagnostics are okay. We also note that the model is quite slow - `r round(summarise_sbc_diagnostics(sbc_res_saddlepoint_small)$median_total_time)` seconds for just 10 observations is high.  
 
 Let's look at the SBC histogram at two resolutions: 
 
@@ -419,7 +419,7 @@ plot_sbc_scatter(sbc_res_saddlepoint_small$params, x_axis_trans = "log10", y_axi
 ```
 
 The blue line indicates perfect match (true value = posterior median)
-As in the above plot, we see that $\mu_{G+1}$ is usually inferred quite precisely, while the results for $\phi_{G+1}$ are diffuse, often dominated by the priors and have a slight tendency to be below the perfect prediction line.
+As in the above plot, we see that $\mu_{G+1}$ is inferred quite precisely, especially for larger true values, while the results for $\phi_{G+1}$ are diffuse, often dominated by the priors (the prior density peaks at around 1.7) and have a slight tendency to be below the perfect prediction line. We also see that low true values of $\mu_{G+1}$ tend to be overestimated - this is not unexpected as when the observed $\mu$ is large and unobserved small it is hard to infer it's exact value and the posterior is largely influenced by prior (which has large mean).
 
 ### Moments
 
@@ -454,6 +454,8 @@ if(!file.exists(results_file_moments_small) ||
 summarise_sbc_diagnostics(sbc_res_moments_small)
 ```
 
+We see some small number of divergences and low n_eff and high Rhat (which go usually hand in hand). This is comparable to the saddlepoint case.
+
 The histogram:
 
 ```{r}
@@ -461,7 +463,9 @@ plot_sbc_histogram(sbc_res_moments_small$params)
 plot_sbc_histogram(sbc_res_moments_small$params, binwidth = 2)
 ```
 
-And the scatterplot:
+The histrograms look very slightly worse than the saddlepoint approximation - although there is no consistent trend, more bars are outside the confidence interval or close to the border, indicating some issues, although I honestly don't really understand what is going on.
+
+And the scatterplot, which looks quite similar to the saddlepoint version:
 
 ```{r}
 plot_sbc_scatter(sbc_res_moments_small$params, x_axis_trans = "log10", y_axis_trans = "log10")
@@ -483,6 +487,8 @@ observed_mean_sd_large <- 1
 Further, we can check the case where there are 20 known variables with low means and one NB is unknown with a large mean - once again we want the unobserved mean to have notable influence on the total outcome, hence we choose it to be larger. In particular, the observed means are drawn from LogNormal(`r observed_mean_mus_large`,`r observed_mean_sd_large`) and the mean to be inferred is drawn from LogNormal(`r mu_prior_mean_large`,`r mu_prior_sd_large`)
 
 ### Saddlepoint
+
+Looking at the statisics, we see only very few divergences, but quite large median time:
 
 ```{r}
 results_file_saddlepoint_large <- paste0(results_cache_dir, "/saddlepoint_large.rds")
@@ -520,13 +526,17 @@ plot_sbc_histogram(sbc_res_saddlepoint_large$params)
 plot_sbc_histogram(sbc_res_saddlepoint_large$params, binwidth = 2)
 ```
 
+We see that especially for $\phi_{G+1}$ the results are discouraging with the true value frequently being in the low quantiles of the posterior. 
+
 ```{r}
 plot_sbc_scatter(sbc_res_saddlepoint_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
 
-
+The scatterplot is than qutie similar to the previous cases.
 
 ### Moments
+
+The statistics for moments show short running time but a larger amount of convergence issues:
 
 ```{r}
 results_file_moments_large <- paste0(results_cache_dir, "/moments_large.rds")
@@ -556,15 +566,20 @@ if(!file.exists(results_file_moments_large) ||
 summarise_sbc_diagnostics(sbc_res_moments_large)
 ```
 
+The histograms:
+
 ```{r}
 plot_sbc_histogram(sbc_res_moments_large$params)
 plot_sbc_histogram(sbc_res_moments_large$params, binwidth = 2)
 ```
 
+The histograms hint at consistent underestimation of $\mu_{G+1}$ and overestimation of $\phi_{G+1}$, problematic especially for $\phi_{G+1}$.
+
 ```{r}
 plot_sbc_scatter(sbc_res_moments_large$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
 
+Once again the scatter is simaler, the only interesting feature are the few outliers for $\mu_{G+1}$ where the true value is large but the posterior median is very small. Those likely correspond to the divergent runs, but they cannot account for the full skew of the SBC histograms - this is more likely caused by the string of underestimated points just below the blue line on the top right.
 
 ## Sum Defined by Series
 
@@ -572,13 +587,13 @@ The first model is not very useful when `G` is large, because the posterior gets
 
 ```{r, message = FALSE}
 series_model_file <- here("static","post","2019-saddlepoint-approximation","test_sum_nb_series.stan")
-cat(series_model_file)
+cat(paste0(readLines(series_model_file), collapse = "\n"))
 series_model_sum_nb <- stan_model(series_model_file, isystem = here("static","post","2019-saddlepoint-approximation"))
 ```
 
 The R code for simulation is then:
 
-```{r echo = TRUE}
+```{r, echo = TRUE}
 generator_series <- function(G, N, method = "saddlepoint", mu_prior_mean, mu_prior_sd, mu_series_coeff, phi_series_coeff) {
   if(method == "saddlepoint") {
     method_id = 0
@@ -674,17 +689,20 @@ if(!file.exists(results_file_saddlepoint_series) ||
 summarise_sbc_diagnostics(sbc_res_saddlepoint_series)
 ```
 
-And on the SBC plots:
+We see quite a few divergences, but I didn't investigate them in detail. The SBC histograms follow:
 
 ```{r}
 plot_sbc_histogram(sbc_res_saddlepoint_series$params)
 plot_sbc_histogram(sbc_res_saddlepoint_series$params, binwidth = 2)
 ```
 
+The histrograms hint at some problems for $\mu$.
+
 ```{r}
 plot_sbc_scatter(sbc_res_saddlepoint_series$params, x_axis_trans = "log10", y_axis_trans = "log10")
 ```
 
+The scatterplot shows that the estimation is quite reasonable for both $\mu$ and $\phi$ - definitely better than the previous model, as we got rid of the cases where the data do not identify the true values well.
 
 ### Moments
 
@@ -721,20 +739,25 @@ if(!file.exists(results_file_moments_series) ||
 summarise_sbc_diagnostics(sbc_res_moments_series)
 ```
 
+We see a bunch of problems, comparable to the saddlepoint version. Let's look at the SBC histograms:
+
 ```{r}
 plot_sbc_histogram(sbc_res_moments_series$params)
 plot_sbc_histogram(sbc_res_moments_series$params, binwidth = 2)
 ```
 
+And those are surprisingly nice, showing no clear trend or outliers!
 
 ```{r}
 plot_sbc_scatter(sbc_res_moments_series$params, x_axis_trans = "log10", y_axis_trans = "log10")
 
 ```
 
+The scatterplot is very similar to the saddlepoint case.
+
 # Summing up
 
-We see that in the regimes we tested, the saddlepoint approximation for sum of negative binomials provides  somewhat better inferences at the cost of much increased computation times. So it is probably not very practical unless you need that extra bit of precision. But it is a neat mathematical trick and of interest on its own. It is also possible that for some low-mean regimes the difference is bigger.
+We see that in the regimes we tested, the saddlepoint approximation for sum of negative binomials provides  somewhat better inferences for small number of variables at the cost of much increased computation times. For sums of large number of variables, it may even be worse than the moments method. So it is probably not very practical unless you have few variables you need that extra bit of precision. But it is a neat mathematical trick and of interest on its own. It is also possible that for some low-mean regimes the difference is bigger.
 
 # Worked out saddlepoint approximations for other families
 
