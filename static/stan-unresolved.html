@@ -1,0 +1,21 @@
+<html>
+<head><title>Redirecting to unresolved topics...</title>
+<body>
+<script>
+Date.prototype.addDays = function(days) {
+    var date = new Date(this.valueOf());
+    date.setDate(date.getDate() + days);
+    return date;
+}
+//https://stackoverflow.com/questions/563406/add-days-to-javascript-date
+var date = new Date();
+
+var twoDaysAgo = date.addDays(-2);
+//https://stackoverflow.com/questions/23593052/format-javascript-date-as-yyyy-mm-dd
+var twoDaysAgoString = twoDaysAgo.toISOString().split('T')[0]
+
+// Simulate a mouse click:
+window.location.href = "https://discourse.mc-stan.org/search?q=after%3A2020-02-27%20before%3A" + twoDaysAgoString + "%20status%3Asingle_user%20in%3Aunsolved%20-tags%3Ano-solution%20%20order%3Alatest";
+</script>
+</body>
+</html>
