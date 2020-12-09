@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Multilevel models and metaanalysis</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Martin Modrák" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Multilevel models and metaanalysis
+### Martin Modrák
+
+---
+
+
+# Intro
+
+- Goes by many names: 
+  - Multilevel models 
+  - Random effects 
+  - Varying intercept/slope 
+  - Mixed models 
+  - Metaanalysis
+- Packages:
+  - `lme4` (frequentist)
+  - `rstanarm` (Bayesian, easy to install)
+  - `brms` (Bayesian, very flexible)
+
+
+
+---
+class: inverse, center, middle
+
+
+
+# Linear models recap
+
+---
+
+## Model formulation
+
+`$$\mu = \beta X$$`
+--
+`$$\mu_i = \beta_0 + \beta_{age} X_{i,age} + \beta_{treatment} X_{i,treatment}$$`
+
+--
+
+`$$y_i \sim N(\mu_i, \sigma)$$`
+
+---
+
+## Model formulation (R)
+
+
+`$$\mu_i = \beta_0 + \beta_{age} X_{i,age} + \beta_{treatment} X_{i,treatment}$$`
+
+--
+
+
+```
+##      y age     group
+## 1 34.9  23   control
+## 2 39.7  28   control
+## 3 64.2  30 treatment
+```
+
+--
+
+R formula 
+
+```
+y ~ 1 + age + group
+```
+
+--
+
+
+```r
+model.matrix(y ~ 1 + age + group, mock_lin_data)
+```
+
+```
+##   (Intercept) age grouptreatment
+## 1           1  23              0
+## 2           1  28              0
+## 3           1  30              1
+## attr(,"assign")
+## [1] 0 1 2
+## attr(,"contrasts")
+## attr(,"contrasts")$group
+## [1] "contr.treatment"
+```
+
+
+---
+
+## Everything is a linear model!
+
+`t.test(groupA, groupB)` = `lm(y ~ group)` 
+
+---
+class:inverse, middle, center
+
+# A simple example
+
+
+
+
+
+---
+
+## Single group of data
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-4-1.png)&lt;!-- --&gt;
+
+---
+
+## Breaking it down
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-5-1.png)&lt;!-- --&gt;
+
+---
+
+## A set of bad options
+
+A) Ignore batches
+
+`$$\mu_i = \alpha$$`
+
+
+```r
+ignore &lt;- t.test(log_relative_expression ~ 1, 
+                data = base_data_single)
+ignore$conf.int
+```
+
+```
+## [1] -0.1958513  0.1675030
+## attr(,"conf.level")
+## [1] 0.95
+```
+
+--
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-7-1.png)&lt;!-- --&gt;
+
+
+---
+
+## A set of bad options
+
+B) Treat batches as separate
+
+`$$\mu_i = \alpha + \beta_1 \mathrm{isB}_i + \beta_2 \mathrm{isC}_i$$`
+
+
+```r
+separate &lt;- lm(log_relative_expression ~ batch, 
+               data = base_data_single) 
+confint(separate)
+```
+
+```
+##                   2.5 %     97.5 %
+## (Intercept)  0.07105826  0.4011312
+## batchB      -0.64721523 -0.1253241
+## batchC      -0.85532392 -0.2836209
+```
+
+--
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-9-1.png)&lt;!-- --&gt;
+
+
+---
+
+## A set of bad options
+
+C) Take averages of the batches
+
+
+
+
+```r
+take_means &lt;- t.test(log_relative_expression ~ 1, 
+                     data = batch_means)
+take_means$conf.int
+```
+
+```
+## [1] -0.8046443  0.6396724
+## attr(,"conf.level")
+## [1] 0.95
+```
+
+--
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-12-1.png)&lt;!-- --&gt;
+
+---
+
+## Varying intercept
+
+The batches are not identical, but also not independent
+
+`$$\mu_i = \alpha + \beta_{batch(i)} \\
+\beta_{batch(1,2,3)} \sim N(0, \sigma_{batch})$$`
+
+--
+
+
+```r
+varying_intercept &lt;- rstanarm::stan_lmer(
+  log_relative_expression ~ 1 + (1 | batch), 
+  data = base_data_single)
+summ_varying_intercept &lt;- 
+  summary(varying_intercept, probs = c(0.025,0.975))
+summ_varying_intercept[1:6, c("2.5%", "97.5%")]
+```
+
+```
+##                                              2.5%     97.5%
+## (Intercept)                          -0.413961295 0.3038147
+## b[(Intercept) batch:A]               -0.105670142 0.6591598
+## b[(Intercept) batch:B]               -0.480985504 0.2760657
+## b[(Intercept) batch:C]               -0.623739386 0.1366592
+## sigma                                 0.133893668 0.3359758
+## Sigma[batch:(Intercept),(Intercept)]  0.006227291 0.4276699
+```
+
+???
+
+More parameters, less flexible
+
+---
+
+## A middle ground
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-13-1.png)&lt;!-- --&gt;
+
+---
+
+## Partial pooling
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-14-1.png)&lt;!-- --&gt;
+
+
+
+---
+
+## Different prediction tasks
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-15-1.png)&lt;!-- --&gt;
+
+
+
+---
+class: inverse, middle, center
+
+# More complex example
+
+---
+
+## All data together
+
+```
+log_relative_expression ~ group
+```
+
+
+`$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i$$`
+
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-16-1.png)&lt;!-- --&gt;
+
+
+---
+
+## Break it down
+
+```
+log_relative_expression ~ batch * group
+```
+
+`$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i + \beta_2 \mathrm{isB}_i + \beta_3 \mathrm{isC}_i + \\
+\beta_4 \mathrm{isTreatment}_i \mathrm{isB}_i + \beta_5  \mathrm{isTreatment}_i \mathrm{isC}_i$$`
+
+
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-17-1.png)&lt;!-- --&gt;
+
+???
+
+I can also make the effect be the same in all groups
+
+---
+
+## Varying intercept + varying effect
+
+```
+log_relative_expression ~ group + (1 + group || batch)
+```
+
+
+`$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i + \gamma_{batch(i)} + \delta_{batch(i)} \mathrm{isTreatment}_i \\
+\gamma_{batch(1,2,3)} \sim N(0, \sigma_{\mathrm{batch\_intercept}}) \\ 
+\delta_{batch(1,2,3)} \sim N(0, \sigma_{\mathrm{batch\_effect}})$$`
+
+
+
+
+
+```r
+varying_effect &lt;- brms::brm(
+  log_relative_expression ~ group + (1 + group || batch), 
+  data = base_data,
+  prior = c(brms::set_prior("normal(0,1)", class = "b"),
+            brms::set_prior("normal(0,1)", class = "sd")),
+  control = list(adapt_delta = 0.99))
+```
+
+---
+
+## Varying intercept + varying effect
+
+
+```
+## Warning: There were 1 divergent transitions after warmup. Increasing adapt_delta
+## above may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-
+## after-warmup
+```
+
+```
+##  Family: gaussian 
+##   Links: mu = identity; sigma = identity 
+## Formula: log_relative_expression ~ group + (1 + group || batch) 
+##    Data: base_data (Number of observations: 38) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Group-Level Effects: 
+## ~batch (Number of levels: 3) 
+##                    Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sd(Intercept)          0.35      0.32     0.02     1.23 1.00      796     1256
+## sd(grouptreatment)     0.32      0.30     0.01     1.13 1.00      913     1759
+## 
+## Population-Level Effects: 
+##                Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## Intercept          0.07      0.27    -0.52     0.57 1.00     1069     1076
+## grouptreatment     0.06      0.25    -0.46     0.56 1.00     1248     1115
+## 
+## Family Specific Parameters: 
+##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma     0.29      0.04     0.23     0.38 1.00     1973     2229
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).
+```
+---
+
+
+## Varying intercept + varying effect
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-20-1.png)&lt;!-- --&gt;
+
+
+
+
+
+
+
+---
+class: inverse, center, middle
+
+# Meta-analysis
+
+---
+
+## Now it's simple
+
+That's exactly what meta-analysis is! 
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-22-1.png)&lt;!-- --&gt;
+
+
+---
+
+## Runing a meta-analysis 
+
+
+```r
+metaanalysis &lt;- brms::brm(
+  estimate | se(std_error) ~ 1 + (1 | study), 
+  data = metaanalysis_data, 
+  control = list(adapt_delta = 0.99))
+```
+
+```
+## Compiling Stan program...
+```
+
+```
+## Start sampling
+```
+
+```
+## 
+## Warning: 1 of 4000 (0.0%) transitions ended with a divergence.
+## This may indicate insufficient exploration of the posterior distribution.
+## Possible remedies include: 
+##   * Increasing adapt_delta closer to 1 (default is 0.8) 
+##   * Reparameterizing the model (e.g. using a non-centered parameterization)
+##   * Using informative or weakly informative prior distributions
+```
+
+---
+
+
+```
+## Warning: There were 1 divergent transitions after warmup. Increasing adapt_delta
+## above may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-
+## after-warmup
+```
+
+![](dojo_multilevel_files/figure-html/unnamed-chunk-23-1.png)&lt;!-- --&gt;
+
+
+---
+
+
+# Further reading
+
+- How to develop a model without overfitting?
+  - Bayesian Workflow https://arxiv.org/abs/2011.01808
+
+## Thanks!
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
