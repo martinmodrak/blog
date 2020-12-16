@@ -1,5 +1,5 @@
 ---
-title: "Enforcing line-break rules in RMarkdown / Pandoc"
+title: "Enforcing line-break rules in RMarkdown via Pandoc"
 date: '2020-12-16'
 tags:
 - R
