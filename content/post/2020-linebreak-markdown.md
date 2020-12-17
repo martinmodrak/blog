@@ -19,7 +19,8 @@ tedious and prone to error. And it turns out one can do this automatically - wit
 The thing is that RMarkdown uses Pandoc to convert (non-R) markdown to the target formats.
 And Pandoc let's you manipulate an intermediate representation of the text using Lua - 
 a tiny little language that is commonly used as scripting language in video games.
-You can read more about Lua filters at [R Markdown cookbook](https://bookdown.org/yihui/rmarkdown-cookbook/lua-filters.html) and [Pandoc documentation](https://pandoc.org/lua-filters.html).
+You can read more about Lua filters at [R Markdown cookbook](https://bookdown.org/yihui/rmarkdown-cookbook/lua-filters.html) and [Pandoc documentation](https://pandoc.org/lua-filters.html). There is also a very nice and
+practical [article by Ulrik Lyngs](https://ulriklyngs.com/post/2019/02/20/how-to-use-pandoc-filters-for-advanced-customisation-of-your-r-markdown-documents/).
 
 With this knowledge, we can write a filter that checks for spaces after single-letter
 words and after a certain abbreviations and replaces them with an appropriate
