@@ -1,0 +1,400 @@
+---
+title: "Three ways to compute Bayes Factors"
+date: 2021-03-26
+tags: ["R","Stan","Bayes Factors"]
+---
+
+
+This post was inspired by a very interestning paper on Bayes Factors: 
+[Workflow Techniques for the Robust Use of Bayes Factors](https://arxiv.org/abs/2103.08744) 
+by Schad, Nicenboim, Bürkner, Betancourt and Vasishth. 
+I would specifically recommend it for its introduction into what actually is a hypothesis
+in the Bayesian context and insights into what Bayes factors are.
+
+I wrote this post test my understanding of the material - the logic of Bayes factors
+implies that there are multiple ways to compute the same Bayes factor, 
+each providing a somewhat different intuition on how to interpret them.
+
+This post reverses the order from the paper - we start with examples and code and
+end with a (tiny bit) of theory. Anyone who prefers math first, examples later or wants
+a deeper dive into the theory should start by reading the paper.
+
+We will fit a few models with the newer R interface for Stan [CmdStanR](https://mc-stan.org/cmdstanr/articles/cmdstanr.html)
+and with [brms](http://paul-buerkner.github.io/brms/).
+
+```{r setup, message=FALSE, warning=FALSE}
+library(cmdstanr)
+library(brms)
+options(mc.cores = parallel::detectCores(), brms.backend = "cmdstanr")
+```
+
+**Note on notation:** I tried to be consistent and use plain symbols ($y_1, z, ...$)
+for variables, bold symbols ($\mathbf{y}, \mathbf{\Sigma}$) for vectors and matrices,
+$P(A)$ for the probability of event $A$ and $p(y)$ for the density of random variable.
+
+## Our contestants
+
+We will keep stuff very simple. Our first contestant, the humble _null model_ a.k.a. $\mathcal{M}_1$ 
+will be that the $K$ data points are independent draws from a standard normal distribution, i.e.:
+
+$$
+\mathcal{M}_1 : \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim N(0,1)
+$$
+In code, simulating from such a model this would look like:
+
+```
+N <- 10 # Size of dataset
+y <- rnorm(N, mean = 0, sd = 1)
+```
+
+The null model has faced a lot of rejection in their whole life, but has kept its
+spirit up despite all the adversity. But will it be enough?
+
+
+The challenger will be the daring _intercept model_ a.k.a. the destroyer of souls 
+a.k.a. $\mathcal{M}_2$ that posits that there is an unknown,
+almost surely non-zero mean of the normal distribution, i.e.:
+
+$$
+\mathcal{M}_2: \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim \alpha + N(0, 1) \\
+\alpha \sim N(0,2)
+$$
+
+The corresponding R code would be:
+
+```
+N <- 10 # Size of dataset
+alpha <- rnorm(1, 0, 2)
+y <- rnorm(N, mean = alpha, sd = 1)
+```
+
+
+This comparison is roughly the Bayesian alternative of a single sample t-test.
+
+Finally let's prepare some data for our contestants to chew on:
+
+```{r}
+#y <- c(0.5,0.7, -0.4, 0.1)
+y <- rnorm(10)
+```
+
+
+## Method 1: brms::hypothesis
+
+We will start by where most users probably start: invoking a statistical package to compute the Bayes factor.
+Here we will use the `hypothesis` function from `brms` which uses the Savage-Dickey method under the hood.
+
+For this, we note that the null model is just a special case of the intercept model, destroyer of suns. 
+So let us fit this model ($\mathcal{M}_2$) in `brms`. We will be using a lot of samples to reduce estimator error
+as Bayes factors can be quite sensitive.
+
+```{r}
+cache_dir <- "_bf_cache"
+if(!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}
+
+fit_brms <- brm(y ~ 0 + Intercept,  # `0 + Intercept` avoids centering
+                prior = 
+                  c(prior(normal(0,2), class = b), # Our prior on intercept
+                    prior(constant(1), class = sigma)), # Fix sigma to a constant
+                data = data.frame(y = y),
+                iter = 10000,
+                sample_prior = "yes",  # Needed to compute BF
+                refresh = 0, silent = TRUE,
+                file = paste0(cache_dir, "/fit"), # Cache the results
+                file_refit = "on_change")
+```
+
+Hypothesis then gives us two numbers, the Bayes factor of null over intercept ($BF_{12}$), a.k.a. evidence ratio:
+
+```{r}
+hyp_res <- hypothesis(fit_brms, "Intercept = 0")
+bf_brms <- hyp_res$hypothesis$Evid.Ratio
+bf_brms
+```
+
+and the posterior probability that null model generated the data $P(\mathcal{M}_1 | \mathbf{y})$:
+
+```{r}
+prob_null_brms <- hyp_res$hypothesis$Post.Prob
+prob_null_brms
+```
+Those two qunatities happen to share a pretty straightforward relationship, given the prior
+probabilities of the individual models $P(\mathcal{M}_1)$, $P(\mathcal{M}_2)$ i.e.:
+
+$$
+P(\mathcal{M}_1 | \mathbf{y}) = \frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + BF_{22}P(\mathcal{M}_2)} = \\
+ = 
+\frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + P(\mathcal{M}_2)}
+$$
+Where $BF_22 = 1$ is the Bayes factor of the intercept model, cruel queen of the damned, against itself. 
+If the prior is uniform, i.e. $P(\mathcal{M}_1) = P(\mathcal{M}_2)$ - as is assumed by `brms` - the formula further simplifies to:
+
+$$
+P(\mathcal{M}_1 | \mathbf{y}) = 
+\frac{BF_{12}}{BF_{12} + 1}
+$$
+
+The Bayes factor might look a bit like a magic number, so let us demystify it with two
+more transparent approaches that give us the same Bayes factor.
+
+## Method 2: Prior predictive density
+
+One way to define Bayes factor is as the ratio of _evidence_ i.e.:
+
+$$
+BF_{12} = \frac{P(\mathbf{y} | \mathcal{M}_1)}{P(\mathbf{y} | \mathcal{M}_2)}
+$$
+
+Where "evidence" is exactly the prior density of the data after integrating out all the parameters. 
+Since we have chosen very simple models, there is an analytic formula for evidence for both models.
+
+As is usually done for numerical stability, we will primarily operate on the log scale. 
+Computing the evidence for the null model is straightforward - there are no parameters to integrate out, so we can directly compute:
+
+
+```{r}
+prior_log_evidence_null <- sum(dnorm(y, mean = 0, sd = 1, log = TRUE))
+prior_log_evidence_null
+```
+
+The evidence for the intercept model, prophet of the apocalypse, is _slightly_ more involved. 
+The main idea is that we can see the data as sum of two multivariate normals, 
+one with perfect correlation (corresponding to $K$ identical copies of $\alpha$) and
+one with no correlation (corresponding to noise):
+
+$$
+\mathcal{M}_2: \mathbf{y} = \mathbf{a} + \mathbf{e} \\
+\mathbf{a} \sim MVN(0, \mathbf{\Sigma_a}), \forall_{i,j \in \{1, .., K\}} \Sigma_{a;i,j} = Var(\alpha) = 4 \\
+\mathbf{e} \sim MVN(0, \mathbf{\Sigma_e}), \mathbf{\Sigma_{e}} = I \\
+$$
+
+where $\mathbf{\Sigma_a}$ is a matrix with all elements set to $Var(\alpha) = 4$ 
+and $\mathbf{\Sigme_e}$ is the identity matrix (1 on diagonal, 0 elsewhere).
+From the properties of multivariate normal we know that a sum of multivariate normals
+is obtained by simply adding both means and covariance matrices together, i.e.:
+
+$$
+\mathcal{M}_2: \mathbf{y} \sim MVN(0, \mathbf{\Sigma}) \\
+ \forall_{i \in \{1, .., K\}}\mathbf{\Sigma}_{i,i} = 5 \\
+ \forall_{i \neq j \in \{1, .., K\}} \mathbf{\Sigma}_{i,j} = 4 
+$$
+
+where $\mathbf{\Sigma} = \mathbf{\Sigma_a} + \mathbf{\Sigma_e}$. 
+With that we can compute the evidence for the intercept model, the harbinger of sorrow,
+$P(\mathbf{y} | \mathcal{M}_2)$ as the corresponding multivariate normal density:
+
+```{r}
+
+prior_Sigma <- diag(length(y)) + matrix(4, nrow = length(y), ncol = length(y))
+prior_log_evidence_intercept <- 
+  mvtnorm::dmvnorm(y, mean = rep(0, length(y)), sigma = prior_Sigma, log = TRUE)
+
+prior_log_evidence_intercept
+```
+
+The Bayes factor is then simply the ratio of the evidence:
+
+```{r}
+bf_prior <- exp(prior_log_evidence_null - prior_log_evidence_intercept)
+bf_prior
+```
+
+which happens to match pretty closely with the value obtained via `brms` which was `r bf_brms`. 
+The difference can be attributed to sampling error in the `brms` computation.
+
+We can similarly use the BF to compute the posterior probability of the null model, 
+assuming once again uniform prior:
+
+```{r}
+prob_null_prior <- bf_prior / (bf_prior + 1)
+prob_null_prior
+```
+
+This is once again in close agreement with the `brms` value (`r prob_null_brms`).
+
+The perspective via prior predictive distribution lays bare, why the Bayes factor
+is so sensitive to choice of priors - priors are quite literally the only thing that matters.
+We may also note that in computing the Bayes factor we decide to not use the data to
+inform the parameters of the model. This might be desirable for people who really fear "double dipping" - it makes some sense
+to test two competing hypothesis without letting the data inform either of the models. 
+But it IMHO only makes sense when your hypotheses are precise enough (i.e. have narrow priors) that you don't
+really need additional data to constrain them. 
+
+If your priors are wide and your hypotheses imprecise, it would actually be surprising if Bayes factor gave you something useful (as is
+neatly shown in the Schad et al. paper, which you should read).
+
+## Method 3: Full model
+
+A third perspective is provided by imagining a full model combining our two contestants, i.e.:
+
+$$
+\mathcal{M}_{full}: \mathbf{y} = \{y_1, ... , y_K\} \\
+z \in \{1,2\}; P(z = 1) = P(z = 2) = \frac{1}{2}\\
+y_i \sim N(\mu, 1) \\
+\mu =
+\begin{cases}
+0  & \mathrm{if} \quad z = 1 \\
+\alpha  &  \mathrm{if} \quad z = 2 
+\end{cases}
+\\
+\alpha \sim N(0,2)
+$$
+So we have introduced a new random variable $z$ that works as an index over the two models
+and gave it a discrete uniform prior.
+
+If we fit this model to the data, then $P(\mathcal{M}_1 | \mathbf{y}) = P(z = 1 | \mathbf{y})$,
+so we can use the fitted distribution of $z$ to get the posterior probability of the models
+ which (as shown above) we can transform into a Bayes factor.
+
+Before showing how to do this in Stan, we can use JAGS to implement this model very directly,
+if not very efficiently:
+
+```{r}
+library(rjags)
+
+data_list <- list(
+    y = y)
+
+# The model specification, note that JAGS uses precision to parametrize normal distribution
+# Additionally we have z_0 = z - 1
+model_string <- "model {
+  z_0 ~ dbern(0.5) 
+  alpha ~ dnorm(0, 0.25)
+  for(i in 1:length(y) ) {
+    mu[i] = ifelse(z_0 == 0, 0, alpha)
+    y[i] ~ dnorm(mu[i], 1)
+  } 
+}"
+
+params_to_monitor <- c("z_0", "alpha")
+
+# Running the model
+model <- jags.model( textConnection(model_string), data_list, n.chains = 4, n.adapt= 1000)
+update(model, 1000); # Burning 1000 samples to the MCMC gods...
+mcmc_samples <- coda.samples(model, params_to_monitor, n.iter=10000, thin = 10)
+
+# Extract values and check diagnostics
+alpha_array <- cbind(mcmc_samples[[1]][, "alpha"], mcmc_samples[[2]][, "alpha"],
+                     mcmc_samples[[3]][, "alpha"], mcmc_samples[[4]][, "alpha"])
+posterior::rhat(alpha_array)
+posterior::ess_bulk(alpha_array)
+
+z_array <- cbind(mcmc_samples[[1]][, "z_0"], mcmc_samples[[2]][, "z_0"],
+                 mcmc_samples[[3]][, "z_0"], mcmc_samples[[4]][, "z_0"])
+posterior::rhat(z_array)
+posterior::ess_bulk(z_array)
+```
+
+Posterior probability of the data being from the null model ($P(\mathcal{M}_1 | \mathbf{y})$),
+is then simply the $P(z = 1 | \mathbf{y}) = P(z_0 = 0 | \mathbf{y})$ which can be 
+directly extracted from the samples.
+
+```{r}
+prob_null_jags <- mean(z_array == 0)
+prob_null_jags
+bf_jags <- prob_null_jags / (1 - prob_null_jags)
+bf_jags
+```
+
+We'll note that the fitted probability matches nicely with the analytic solution:
+
+```{r}
+prob_null_prior
+bf_prior
+```
+
+But we obviously want to do this in Stan. But Stan doesn't handle discrete parameters
+you say? This can be overcome!
+
+_Warning: I had a lot of trouble thinking clearly about the rest of this section, so it is possible, there are mistakes or stuff is confusing. Please let me know, if you find the reasoning problematic/unclear/unconvincing._
+
+The idea is that we introduce a new continuous 
+parameter $s$, such that:
+
+$$
+\mathcal{M}_{full-Stan}: s \sim \mathrm{Uniform}(0, 1) \\
+P(z = 1 | s) = s
+$$
+It can easily be checked that if we integrate $s$ out, $z$ will have discrete uniform distribution,
+so we didn't change the model in any fundamental way. However, we can now also rewrite the rest of the model as:
+
+$$
+\mathcal{M}_{full-Stan}: \\
+p(\mathbf{y} | \alpha, s) = s \times p(\mathbf{y} | z = 1) + (1 - s) \times p(\mathbf{y} | z = 2, \alpha)
+$$
+Now we have a density for $y$ that is a combination of two normal densities and does not have $z$ as a free parameter and
+can thus be written in Stan.
+
+However, there is a catch - it would be tempting to interpret $\mathrm{E}(s | \mathbf{y})$ as the posterior probability that $z = 1$. This is however not true - the posterior for $E(s | \mathbf{y})$ represents the probability we would expect to see $z_{new} = 1$, where $z_{new}$ arised by a new random draw from a biased binary (Bernoulli) distribution with mean $s$. We are however interested,
+whether we observed $z = 1$ in the experiment that just concluded! We would also usually presume that $z$ will not change value in the next experiment.
+
+To avoid confusion, I will now use $P(z_{new} = 1) = s$ to denote the probability
+that any new draw is $1$ while having $P(z_{obs} = 1)$ be the probability that the single
+variable that gave rise to our dataset had value $1$. 
+
+By Bayes rule we have:
+
+$$
+P(z_{obs} = 1 | \mathbf{y}, s, \alpha) =\\ = \frac{P(z_{pop} = 1 | s, \alpha) \times p(\mathbf{y} | z_{obs} = 1, s, \alpha)}{P(z_{pop} = 1 | s, \alpha) \times p(\mathbf{y} | z_{obs} = 1, s, \alpha) + 
+P(z_{pop} = 2 | s, \alpha) \times p(\mathbf{y} | z_{obs} = 2, s, \alpha)} = \\
+=\frac{s \times p(\mathbf{y} | z_{obs} = 1)}{s \times p(\mathbf{y} | z_{obs} = 1) + (1 - s) \times p(\mathbf{y} | z_{obs} = 2, \alpha)}
+$$
+
+$$
+P(z_{obs} = 1 | \mathbf{y}) = \int \int P(z_{obs} = 1 | \mathbf{y}, s, \alpha) \mathrm{d}s\mathrm{d} \alpha \simeq \frac{1}{M} \sum_m P(z_{obs} = 1 | y, s = s_m, \alpha = \alpha_m)
+ \\
+BF_{12} = \frac{p(z = 1)}{1 - p(z = 1)}
+$$
+
+```{r}
+full_model <- cmdstan_model("2021-bayes-factors.stan")
+```
+
+
+```{r}
+fit_full <- full_model$sample(data = list(K = length(y), y = y), refresh = 0, iter_sampling =  10000)
+fit_full
+```
+
+
+
+```{r}
+
+## from http://tr.im/hH5A
+logsumexp <- function (x) {
+  y = max(x)
+  y + log(sum(exp(x - y)))
+}
+
+full_samples <-posterior::as_draws_matrix(fit_full$draws())
+
+
+rel_p_null_s <- full_samples[, "s"] * exp(full_samples[,"log_lik_null"])
+rel_p_intercept_s <- (1 - full_samples[, "s"]) * exp(full_samples[,"log_lik_intercept"])
+p_null_s <- rel_p_null_s / (rel_p_null_s + rel_p_intercept_s)
+p_null <- mean(p_null_s)
+
+log_rel_p_null_s <- log(full_samples[, "s"]) + full_samples[,"log_lik_null"]
+log_rel_p_intercept_s <- log1p(-full_samples[, "s"]) + full_samples[,"log_lik_intercept"]
+
+log_p_null_s <- array(NA_real_, length(log_rel_p_null_s))
+for(i in 1:length(rel_p_null_s)) {
+  log_p_null_s[i] <- log_rel_p_null_s[i] - logsumexp(c(log_rel_p_null_s[i], log_rel_p_intercept_s[i]) )
+}
+p_null_2 <- mean(exp(log_p_null_s))
+
+p_null
+p_null / (1 - p_null)
+p_null_2 / (1 - p_null_2)
+
+```
+
+
+
+In this view, being in an M-open scenario simply means that the full model is misspecified.
+
+Posterior predictive from Bayes factors?
