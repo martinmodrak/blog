@@ -34,5 +34,10 @@ vignettes/*.pdf
 *.nb.html
 
 blogdown/
-public/
+/public/
 .Rproj.user
+.DS_Store
+Thumbs.db
+
+# Compiled Stan models
+*.exe

@@ -1,0 +1,698 @@
+---
+title: "Three ways to compute Bayes Factors"
+date: 2021-03-28
+tags: ["R","Stan","Bayes Factors"]
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>This post was inspired by a very interesting paper on Bayes Factors:
+<a href="https://arxiv.org/abs/2103.08744">Workflow Techniques for the Robust Use of Bayes Factors</a>
+by Schad, Nicenboim, Bürkner, Betancourt and Vasishth.
+I would specifically recommend it for its introduction into what actually is a hypothesis
+in the Bayesian context and insights into what Bayes factors are.</p>
+<p>I wrote this post test my understanding of the material - the logic of Bayes factors
+implies that there are multiple ways to compute the same Bayes factor,
+each providing a somewhat different intuition on how to interpret them.
+So we’ll see how we can compute the Bayes factor using a black-box ready-made package,
+then get the same number analytically via prior predictive density and the get the
+same number by writing a “supermodel” that includes both the individual models we are comparing.</p>
+<p>We’ll do less math and theory here, anyone who prefers math first, examples later or wants
+a deeper dive into the theory should start by reading the paper.</p>
+<p>We will fit a few models with the newer R interface for Stan <a href="https://mc-stan.org/cmdstanr/articles/cmdstanr.html">CmdStanR</a>
+and with <a href="http://paul-buerkner.github.io/brms/">brms</a>.</p>
+<pre class="r"><code>library(cmdstanr)
+library(brms)
+library(tidyverse)
+library(knitr)
+ggplot2::theme_set(cowplot::theme_cowplot())
+options(mc.cores = parallel::detectCores(), brms.backend = &quot;cmdstanr&quot;)
+
+document_output &lt;- isTRUE(getOption(&#39;knitr.in.progress&#39;))
+
+if(document_output) {
+  table_format &lt;- knitr::kable
+} else {
+  table_format &lt;- identity
+}</code></pre>
+<p><strong>Note on notation:</strong> I tried to be consistent and use plain symbols (<span class="math inline">\(y_1, z, ...\)</span>)
+for variables, bold symbols (<span class="math inline">\(\mathbf{y}, \mathbf{\Sigma}\)</span>) for vectors and matrices,
+<span class="math inline">\(P(A)\)</span> for the probability of event <span class="math inline">\(A\)</span> and <span class="math inline">\(p(y)\)</span> for the density of random variable.</p>
+<div id="our-contestants" class="section level2">
+<h2>Our contestants</h2>
+<p>We will keep stuff very simple. Our first contestant, the humble <em>null model</em> a.k.a. <span class="math inline">\(\mathcal{M}_1\)</span>
+will be that the <span class="math inline">\(K\)</span> data points are independent draws from a standard normal distribution, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_1 : \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim N(0,1)
+\]</span>
+In code, simulating from such a model this would look like:</p>
+<pre><code>N &lt;- 10 # Size of dataset
+y &lt;- rnorm(N, mean = 0, sd = 1)</code></pre>
+<p>The null model has faced a lot of rejection in their whole life, but has kept its
+spirit up despite all the adversity. But will it be enough?</p>
+<p>The challenger will be the daring <em>intercept model</em> a.k.a. the destroyer of souls
+a.k.a. <span class="math inline">\(\mathcal{M}_2\)</span> that posits that there is an unknown,
+almost surely non-zero mean of the normal distribution, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_2: \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim \alpha + N(0, 1) \\
+\alpha \sim N(0,2)
+\]</span></p>
+<p>The corresponding R code would be:</p>
+<pre><code>N &lt;- 10 # Size of dataset
+alpha &lt;- rnorm(1, 0, 2)
+y &lt;- rnorm(N, mean = alpha, sd = 1)</code></pre>
+<p>This comparison is roughly the Bayesian alternative of a single sample t-test.</p>
+<p>Finally let’s prepare some data for our contestants to chew on:</p>
+<pre class="r"><code>y &lt;- c(0.5,0.7, -0.4, 0.1)</code></pre>
+</div>
+<div id="method-1-brmshypothesis" class="section level2">
+<h2>Method 1: brms::hypothesis</h2>
+<p>We will start by where most users probably start: invoking a statistical package to compute the Bayes factor.
+Here we will use the <code>hypothesis</code> function from <code>brms</code> which uses the Savage-Dickey method under the hood.</p>
+<p>For this, we note that the null model is just a special case of the intercept model, destroyer of suns.
+So let us fit this model (<span class="math inline">\(\mathcal{M}_2\)</span>) in <code>brms</code>. We will be using a lot of samples to reduce estimator error
+as Bayes factors can be quite sensitive.</p>
+<pre class="r"><code>cache_dir &lt;- &quot;_bf_cache&quot;
+if(!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}
+
+fit_brms &lt;- brm(y ~ 0 + Intercept,  # `0 + Intercept` avoids centering
+                prior = 
+                  c(prior(normal(0,2), class = b), # Our prior on intercept
+                    prior(constant(1), class = sigma)), # Fix sigma to a constant
+                data = data.frame(y = y),
+                iter = 10000,
+                sample_prior = &quot;yes&quot;,  # Needed to compute BF
+                refresh = 0, silent = TRUE,
+                file = paste0(cache_dir, &quot;/fit&quot;), # Cache the results
+                file_refit = &quot;on_change&quot;)</code></pre>
+<p>Hypothesis then gives us two numbers, the Bayes factor of null over intercept (<span class="math inline">\(BF_{12}\)</span>), a.k.a. evidence ratio and the posterior probability that null model generated the data <span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y})\)</span>:</p>
+<pre class="r"><code>hyp_res &lt;- hypothesis(fit_brms, &quot;Intercept = 0&quot;)
+bf_brms &lt;- hyp_res$hypothesis$Evid.Ratio
+prob_null_brms &lt;- hyp_res$hypothesis$Post.Prob
+res_brms &lt;- data.frame(method = &quot;brms&quot;, bf = bf_brms, prob_null = prob_null_brms)
+res_brms %&gt;% table_format</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">bf</th>
+<th align="right">prob_null</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">brms</td>
+<td align="right">3.725066</td>
+<td align="right">0.7883628</td>
+</tr>
+</tbody>
+</table>
+<p>Those two qunatities happen to share a pretty straightforward relationship, given the prior
+probabilities of the individual models <span class="math inline">\(P(\mathcal{M}_1)\)</span>, <span class="math inline">\(P(\mathcal{M}_2)\)</span> i.e.:</p>
+<p><span class="math display">\[
+P(\mathcal{M}_1 | \mathbf{y}) = \frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + BF_{22}P(\mathcal{M}_2)} = \\
+ = 
+\frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + P(\mathcal{M}_2)}
+\]</span>
+Where <span class="math inline">\(BF_{22} = 1\)</span> is the Bayes factor of the intercept model, cruel queen of the damned, against itself.
+If the prior is uniform, i.e. <span class="math inline">\(P(\mathcal{M}_1) = P(\mathcal{M}_2)\)</span> - as is assumed by <code>brms</code> - the formula further simplifies to:</p>
+<p><span class="math display">\[
+P(\mathcal{M}_1 | \mathbf{y}) = 
+\frac{BF_{12}}{BF_{12} + 1}
+\]</span></p>
+<p>The Bayes factor might look a bit like a magic number, so let us demystify it with two
+more transparent approaches that give us the same Bayes factor.</p>
+</div>
+<div id="method-2-prior-predictive-density" class="section level2">
+<h2>Method 2: Prior predictive density</h2>
+<p>One way to define Bayes factor is as the ratio of <em>evidence</em> i.e.:</p>
+<p><span class="math display">\[
+BF_{12} = \frac{P(\mathbf{y} | \mathcal{M}_1)}{P(\mathbf{y} | \mathcal{M}_2)}
+\]</span></p>
+<p>Where “evidence” is exactly the prior density of the data after integrating out all the parameters.
+Since we have chosen very simple models, there is an analytic formula for evidence for both models.</p>
+<p>As is usually done for numerical stability, we will primarily operate on the log scale.
+Computing the evidence for the null model is straightforward - there are no parameters to integrate out, so we can directly compute:</p>
+<pre class="r"><code>prior_log_evidence_null &lt;- sum(dnorm(y, mean = 0, sd = 1, log = TRUE))
+prior_log_evidence_null</code></pre>
+<pre><code>## [1] -4.130754</code></pre>
+<p>The evidence for the intercept model, prophet of the apocalypse, is <em>slightly</em> more involved.
+The main idea is that we can see the data as sum of two multivariate normals,
+one with perfect correlation (corresponding to <span class="math inline">\(K\)</span> identical copies of <span class="math inline">\(\alpha\)</span>) and
+one with no correlation (corresponding to noise):</p>
+<p><span class="math display">\[
+\mathcal{M}_2: \mathbf{y} = \mathbf{a} + \mathbf{e} \\
+\mathbf{a} \sim MVN(0, \mathbf{\Sigma_a}), \forall_{i,j \in \{1, .., K\}} \Sigma_{a;i,j} = Var(\alpha) = 4 \\
+\mathbf{e} \sim MVN(0, \mathbf{\Sigma_e}), \mathbf{\Sigma_{e}} = I \\
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{\Sigma_a}\)</span> is a matrix with all elements set to <span class="math inline">\(Var(\alpha) = 4\)</span>
+and <span class="math inline">\(\mathbf{\Sigma_e}\)</span> is the identity matrix (1 on diagonal, 0 elsewhere).
+From the properties of multivariate normal we know that a sum of multivariate normals
+is obtained by simply adding both means and covariance matrices together, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_2: \mathbf{y} \sim MVN(0, \mathbf{\Sigma}) \\
+ \forall_{i \in \{1, .., K\}}\mathbf{\Sigma}_{i,i} = 5 \\
+ \forall_{i \neq j \in \{1, .., K\}} \mathbf{\Sigma}_{i,j} = 4 
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{\Sigma} = \mathbf{\Sigma_a} + \mathbf{\Sigma_e}\)</span>.
+With that we can compute the evidence for the intercept model, the harbinger of sorrow,
+<span class="math inline">\(P(\mathbf{y} | \mathcal{M}_2)\)</span> as the corresponding multivariate normal density:</p>
+<pre class="r"><code>prior_Sigma &lt;- diag(length(y)) + matrix(4, nrow = length(y), ncol = length(y))
+prior_log_evidence_intercept &lt;- 
+  mvtnorm::dmvnorm(y, mean = rep(0, length(y)), sigma = prior_Sigma, log = TRUE)
+
+prior_log_evidence_intercept</code></pre>
+<pre><code>## [1] -5.452067</code></pre>
+<p>The Bayes factor is then simply the ratio of the evidence and we can use the BF to compute the posterior probability of the null model, assuming once again uniform prior.</p>
+<pre class="r"><code>bf_prior &lt;- exp(prior_log_evidence_null - prior_log_evidence_intercept)
+prob_null_prior &lt;- bf_prior / (bf_prior + 1)
+res_prior &lt;- data.frame(method = &quot;prior&quot;, bf = bf_prior, prob_null = prob_null_prior)
+rbind(res_prior, res_brms) %&gt;% table_format</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">bf</th>
+<th align="right">prob_null</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">prior</td>
+<td align="right">3.748338</td>
+<td align="right">0.7894000</td>
+</tr>
+<tr class="even">
+<td align="left">brms</td>
+<td align="right">3.725066</td>
+<td align="right">0.7883628</td>
+</tr>
+</tbody>
+</table>
+<p>We see the results happen to match pretty closely with the value obtained via <code>brms</code>.
+The difference can be attributed to sampling error in the <code>brms</code> computation.</p>
+<div id="what-to-make-of-this" class="section level3">
+<h3>What to make of this?</h3>
+<p>The perspective via prior predictive distribution lays bare why the Bayes factor
+is so sensitive to choice of priors - priors are quite literally the only thing that matters.
+We may also note that in computing the Bayes factor we decide to not use the data to
+inform the parameters of the model. This might be desirable for people who really fear “double dipping” - it makes some sense
+to test two competing hypothesis without letting the data inform either of the models.
+But it IMHO only makes sense when your hypotheses are precise enough (i.e. have narrow priors) that you don’t
+really need additional data to constrain them.</p>
+<p>If your priors are wide and your hypotheses imprecise, Bayes factor may not give you anything useful (as is
+neatly shown in the Schad et al. paper, which you should read).</p>
+</div>
+</div>
+<div id="method-3-supermodel" class="section level2">
+<h2>Method 3: Supermodel</h2>
+<p>A third perspective is provided by imagining a “supermodel” combining our two contestants, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_{super}: \mathbf{y} = \{y_1, ... , y_K\} \\
+z \in \{1,2\}; P(z = 1) = P(z = 2) = \frac{1}{2}\\
+y_i \sim N(\mu, 1) \\
+\mu =
+\begin{cases}
+0  &amp; \mathrm{if} \quad z = 1 \\
+\alpha  &amp;  \mathrm{if} \quad z = 2 
+\end{cases}
+\\
+\alpha \sim N(0,2)
+\]</span>
+So we have introduced a new random variable <span class="math inline">\(z\)</span> that works as an index over the two models
+and gave it a discrete uniform prior.</p>
+<p>If we fit this model to the data, then <span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y}) = P(z = 1 | \mathbf{y})\)</span>,
+so we can use the fitted distribution of <span class="math inline">\(z\)</span> to get the posterior probability of the models
+which (as shown above) we can transform into a Bayes factor.</p>
+<p>Before showing how to do this in Stan, we can use JAGS to implement this model very directly,
+if not very efficiently:</p>
+<pre class="r"><code>suppressPackageStartupMessages(library(rjags))</code></pre>
+<pre><code>## Warning: package &#39;rjags&#39; was built under R version 4.0.4</code></pre>
+<pre class="r"><code>data_list &lt;- list(
+    y = y)
+
+# The model specification, note that JAGS uses precision
+# to parametrize normal distribution
+# Additionally we have z_0 = z - 1
+jags_model_string &lt;- &quot;model {
+  z_0 ~ dbern(0.5) 
+  alpha ~ dnorm(0, 0.25)
+  for(i in 1:length(y) ) {
+    mu[i] = ifelse(z_0 == 0, 0, alpha)
+    y[i] ~ dnorm(mu[i], 1)
+  } 
+}&quot;
+
+params_to_monitor &lt;- c(&quot;z_0&quot;, &quot;alpha&quot;)
+
+# Running the model
+model &lt;- jags.model( textConnection(jags_model_string), data_list, 
+                     n.chains = 4, n.adapt= 1000)</code></pre>
+<pre><code>## Compiling model graph
+##    Resolving undeclared variables
+##    Allocating nodes
+## Graph information:
+##    Observed stochastic nodes: 4
+##    Unobserved stochastic nodes: 2
+##    Total graph size: 12
+## 
+## Initializing model</code></pre>
+<pre class="r"><code>update(model, 1000); # Burning 1000 samples to the MCMC gods...
+mcmc_samples &lt;- coda.samples(model, params_to_monitor, n.iter=10000, thin = 10)
+
+# Extract values and check diagnostics
+alpha_array &lt;- cbind(mcmc_samples[[1]][, &quot;alpha&quot;], mcmc_samples[[2]][, &quot;alpha&quot;],
+                     mcmc_samples[[3]][, &quot;alpha&quot;], mcmc_samples[[4]][, &quot;alpha&quot;])
+posterior::rhat(alpha_array)</code></pre>
+<pre><code>## [1] 1.000702</code></pre>
+<pre class="r"><code>posterior::ess_bulk(alpha_array)</code></pre>
+<pre><code>## [1] 3789.891</code></pre>
+<pre class="r"><code>z_array &lt;- cbind(mcmc_samples[[1]][, &quot;z_0&quot;], mcmc_samples[[2]][, &quot;z_0&quot;],
+                 mcmc_samples[[3]][, &quot;z_0&quot;], mcmc_samples[[4]][, &quot;z_0&quot;])
+posterior::rhat(z_array)</code></pre>
+<pre><code>## [1] 1.000341</code></pre>
+<pre class="r"><code>posterior::ess_bulk(z_array)</code></pre>
+<pre><code>## [1] 3843.419</code></pre>
+<p>Posterior probability of the data being from the null model (<span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y})\)</span>),
+is then simply the <span class="math inline">\(P(z = 1 | \mathbf{y}) = P(z_0 = 0 | \mathbf{y})\)</span> which can be
+directly extracted from the samples.</p>
+<pre class="r"><code>prob_null_jags &lt;- mean(z_array == 0)
+bf_jags &lt;- prob_null_jags / (1 - prob_null_jags)
+res_jags &lt;- data.frame(method = &quot;super_jags&quot;, bf = bf_jags, 
+                       prob_null = prob_null_jags)
+rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">bf</th>
+<th align="right">prob_null</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">super_jags</td>
+<td align="right">3.750594</td>
+<td align="right">0.7895000</td>
+</tr>
+<tr class="even">
+<td align="left">prior</td>
+<td align="right">3.748338</td>
+<td align="right">0.7894000</td>
+</tr>
+<tr class="odd">
+<td align="left">brms</td>
+<td align="right">3.725066</td>
+<td align="right">0.7883628</td>
+</tr>
+</tbody>
+</table>
+<p>We once again see a good agreement.</p>
+<p>But we obviously want to do this in Stan. But Stan doesn’t handle discrete parameters
+you say? This can be overcome!</p>
+<p><em>Warning: I had a lot of trouble thinking clearly about the rest of this section, so it is possible, there are mistakes or stuff is confusing. Please let me know, if you find the reasoning problematic/unclear/unconvincing.</em></p>
+<p>The important point is called marginalization and there is more discussion in the <a href="https://mc-stan.org/docs/2_26/stan-users-guide/latent-discrete-chapter.html">Stan User’s guide</a>.
+The point is that we can express the unnormalized density <span class="math inline">\(p(\alpha, \mathbf{y})\)</span> as:</p>
+<p><span class="math display">\[
+\mathcal{M}_{super-marginalized}: \\
+p(\alpha, \mathbf{y}) = p(\alpha)p(\mathbf{y}| \alpha) \\
+p(\mathbf{y}| \alpha) = p(\mathbf{y} | \alpha, z = 1)p(z = 1) + p(\mathbf{y} | \alpha, z = 1)p(z = 0)
+\]</span>
+Now we have a density for <span class="math inline">\(y\)</span> that is a combination of two normal densities and does not have <span class="math inline">\(z\)</span> as a free parameter and can thus be written in Stan as:</p>
+<pre class="r"><code>cat(readLines(&quot;2021-bayes-factors.stan&quot;), sep = &quot;\n&quot;)</code></pre>
+<pre><code>data {
+  int K;
+  vector[K] y;
+}
+
+parameters {
+  real alpha;
+}
+
+transformed parameters {
+  real log_lik_null = normal_lpdf(y | 0, 1);
+  real log_lik_intercept = normal_lpdf(y | alpha, 1);
+}
+
+model {
+    target += log_mix(0.5, log_lik_null, log_lik_intercept);
+    target += normal_lpdf(alpha | 0, 2);
+}</code></pre>
+<pre class="r"><code>super_model &lt;- cmdstan_model(&quot;2021-bayes-factors.stan&quot;)</code></pre>
+<pre><code>## Model executable is up to date!</code></pre>
+<p>But how do we get back to the value we are actually interested in, that is <span class="math inline">\(P(z = 1 | \mathbf{y})\)</span> when there no longer is any <span class="math inline">\(z\)</span>?</p>
+<p>We can use the Bayes rule and since <span class="math inline">\(z\)</span> and <span class="math inline">\(\alpha\)</span> are a-prior independent, we can assume <span class="math inline">\(P(z = 1 | \alpha) = P(z = 1) = \frac{1}{2}\)</span>. This gives:</p>
+<p><span class="math display">\[
+P(z = 1 | \mathbf{y}, \alpha) =\\ = \frac{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha)}{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha) + 
+P(z = 2 | \alpha) \times p(\mathbf{y} | z = 2, \alpha)} = \\
+=\frac{\frac{1}{2} p(\mathbf{y} | z = 1)}{\frac{1}{2} p(\mathbf{y} | z = 1) + \frac{1}{2} p(\mathbf{y} | z = 2, \alpha)}
+\]</span></p>
+<p>So to get the desired <span class="math inline">\(P(z = 1 | \mathbf{y})\)</span> I need to integrate out <span class="math inline">\(\alpha\)</span>, which I can approximate via posterior samples:</p>
+<p><span class="math display">\[
+P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \simeq \frac{1}{M} \sum_m P(z = 1 | \mathbf{y}, \alpha = \alpha_m)
+\]</span></p>
+<p>So let us fit the model:</p>
+<pre class="r"><code>fit_super &lt;- super_model$sample(
+  data = list(K = length(y), y = y), refresh = 0, iter_sampling = 10000)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 1 finished in 0.3 seconds.
+## Chain 2 finished in 0.3 seconds.
+## Chain 3 finished in 0.3 seconds.
+## Chain 4 finished in 0.3 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.3 seconds.
+## Total execution time: 0.5 seconds.</code></pre>
+<pre class="r"><code>fit_super$summary() %&gt;% table_format()</code></pre>
+<table>
+<colgroup>
+<col width="16%" />
+<col width="10%" />
+<col width="9%" />
+<col width="9%" />
+<col width="9%" />
+<col width="9%" />
+<col width="9%" />
+<col width="8%" />
+<col width="9%" />
+<col width="8%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">variable</th>
+<th align="right">mean</th>
+<th align="right">median</th>
+<th align="right">sd</th>
+<th align="right">mad</th>
+<th align="right">q5</th>
+<th align="right">q95</th>
+<th align="right">rhat</th>
+<th align="right">ess_bulk</th>
+<th align="right">ess_tail</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">lp__</td>
+<td align="right">-6.5690610</td>
+<td align="right">-6.4177150</td>
+<td align="right">0.8621882</td>
+<td align="right">0.7932725</td>
+<td align="right">-8.157348</td>
+<td align="right">-5.703590</td>
+<td align="right">1.000231</td>
+<td align="right">10542.358</td>
+<td align="right">11047.59</td>
+</tr>
+<tr class="even">
+<td align="left">alpha</td>
+<td align="right">0.0344082</td>
+<td align="right">0.0938992</td>
+<td align="right">1.8046963</td>
+<td align="right">1.4730397</td>
+<td align="right">-3.025665</td>
+<td align="right">3.079411</td>
+<td align="right">1.000448</td>
+<td align="right">9547.732</td>
+<td align="right">10347.94</td>
+</tr>
+<tr class="odd">
+<td align="left">log_lik_null</td>
+<td align="right">-4.1307500</td>
+<td align="right">-4.1307500</td>
+<td align="right">0.0000000</td>
+<td align="right">0.0000000</td>
+<td align="right">-4.130750</td>
+<td align="right">-4.130750</td>
+<td align="right">NA</td>
+<td align="right">NA</td>
+<td align="right">NA</td>
+</tr>
+<tr class="even">
+<td align="left">log_lik_intercept</td>
+<td align="right">-10.6158489</td>
+<td align="right">-6.0308700</td>
+<td align="right">10.8762789</td>
+<td align="right">2.8696242</td>
+<td align="right">-31.931310</td>
+<td align="right">-4.041900</td>
+<td align="right">1.000121</td>
+<td align="right">10560.064</td>
+<td align="right">11391.64</td>
+</tr>
+</tbody>
+</table>
+<p>No warnings, <code>rhat</code> and <code>ess</code> look good. Now, let’s extract the partial likelihoods
+and combine them into the BMA weight:</p>
+<pre class="r"><code>super_samples &lt;-posterior::as_draws_matrix(fit_super$draws())
+
+rel_p_null &lt;- exp(super_samples[,&quot;log_lik_null&quot;])
+rel_p_intercept &lt;- exp(super_samples[,&quot;log_lik_intercept&quot;])
+prob_null_stan &lt;- mean(rel_p_null / (rel_p_null + rel_p_intercept))
+
+bf_stan &lt;-  prob_null_stan / (1 - prob_null_stan) 
+
+res_stan &lt;- data.frame(
+  method = &quot;super_stan&quot;, bf = bf_stan, prob_null = prob_null_stan)
+rbind(res_stan, res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">method</th>
+<th align="right">bf</th>
+<th align="right">prob_null</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">super_stan</td>
+<td align="right">3.786786</td>
+<td align="right">0.7910915</td>
+</tr>
+<tr class="even">
+<td align="left">super_jags</td>
+<td align="right">3.750594</td>
+<td align="right">0.7895000</td>
+</tr>
+<tr class="odd">
+<td align="left">prior</td>
+<td align="right">3.748338</td>
+<td align="right">0.7894000</td>
+</tr>
+<tr class="even">
+<td align="left">brms</td>
+<td align="right">3.725066</td>
+<td align="right">0.7883628</td>
+</tr>
+</tbody>
+</table>
+<p>By marginalizing, we are not only having a model with fewer parameters (and hence simpler
+to sample), we are also able to better resolve tails: if I have 1000 samples of <span class="math inline">\(z\)</span>,
+I cannot reliably estimate if <span class="math inline">\(P(z = 1) &lt; 10^{-3}\)</span> - I will just see that none (or almost none) samples are <span class="math inline">\(1\)</span>. After marginalizing, each sample gives me directly a sample of <span class="math inline">\(P(z = 1)\)</span>, so I can get reasonable precision even if <span class="math inline">\(P(z = 1)\)</span> is very close to <span class="math inline">\(0\)</span> or <span class="math inline">\(1\)</span>.</p>
+<p>Viewing Bayes factors as derived from posterior probabilities of an index over candidate models (<span class="math inline">\(z\)</span> in our case), puts a different angle on the distinction between <span class="math inline">\(\mathcal{M}\)</span>-closed scenarios (the true model is among the models we compare) and <span class="math inline">\(\mathcal{M}\)</span>-open / <span class="math inline">\(\mathcal{M}\)</span>-complete where this is not the case.</p>
+<p>If we treat the model selection as fitting the super model with the candidates as submodels, being in an <span class="math inline">\(\mathcal{M}\)</span>-open scenario simply means that the super model is misspecified. Unfortunately, as discussed above, Bayes factors can be very sensitive to both prior and likelihood specification, where other approaches, e.g. approximate leave-one-out cross validation with <code>loo</code> is usually less sensitive to priors and less often overconfident in face of misspecifaction (see e.g. <a href="https://projecteuclid.org/journals/bayesian-analysis/volume-13/issue-3/Using-Stacking-to-Average-Bayesian-Predictive-Distributions-with-Discussion/10.1214/17-BA1091.full">Using Stacking to Average Bayesian Predictive Distributions</a> by Yao et al. for more discussion).</p>
+<p>But we have many good ways to detect model misspecification, including prior and posterior predictive checks and other steps outlined in the <a href="https://arxiv.org/abs/2011.01808">Bayesian workflow preprint</a>. So it would be interesting to test whether there is something to be gained by running prior and posterior predictive checks (or other diagnostics), not only for the component models, but for the “supermodel” implied by the selection scheme. But I’ll that to people who actually want to use Bayes factors :-D.</p>
+</div>
+<div id="broader-comparison" class="section level2">
+<h2>Broader comparison</h2>
+<p>Above, we computed the Bayes factors only for one dataset, so you might not be convinced that the agreement holds for any dataset. So here we’ll encapsulate the code in a few functions and evaluate a bit larger sample.</p>
+<pre class="r"><code>bf_brms &lt;- function(y) {
+  fit_new &lt;- update(fit_brms, newdata = data.frame(y = y), refresh = 0)
+  hyp_res &lt;- hypothesis(fit_new, &quot;Intercept = 0&quot;)
+  bf_brms &lt;- hyp_res$hypothesis$Evid.Ratio
+  prob_null_brms &lt;- hyp_res$hypothesis$Post.Prob
+  data.frame(method = &quot;brms&quot;, bf = bf_brms, prob_null = prob_null_brms)
+}
+
+bf_prior &lt;- function(y) {
+  prior_log_evidence_null &lt;- sum(dnorm(y, mean = 0, sd = 1, log = TRUE))
+  prior_Sigma &lt;- diag(length(y)) + matrix(4, nrow = length(y), ncol = length(y))
+  prior_log_evidence_intercept &lt;- 
+      mvtnorm::dmvnorm(y, mean = rep(0, length(y)), sigma = prior_Sigma, log = TRUE)
+  bf_prior &lt;- exp(prior_log_evidence_null - prior_log_evidence_intercept)
+  prob_null_prior &lt;- bf_prior / (bf_prior + 1)
+
+  data.frame(method = &quot;prior&quot;, bf = bf_prior, prob_null = prob_null_prior)
+}
+
+bf_super_stan &lt;- function(y) {
+  fit_super &lt;- super_model$sample(data = list(K = length(y), y = y), refresh = 0, 
+                                iter_sampling =  10000)
+  
+  super_samples &lt;-posterior::as_draws_matrix(fit_super$draws())
+  
+  rel_p_null &lt;- exp(super_samples[,&quot;log_lik_null&quot;])
+  rel_p_intercept &lt;- exp(super_samples[,&quot;log_lik_intercept&quot;])
+  p_null &lt;- mean(rel_p_null / (rel_p_null + rel_p_intercept))
+  
+  
+  bf &lt;- p_null / (1 - p_null) # The Bayes factor
+  data.frame(method = &quot;super_Stan&quot;, bf = bf, prob_null = p_null)
+}
+
+bf_super_jags &lt;- function(y) {
+  data_list &lt;- list(
+    y = y)
+  params_to_monitor &lt;- c(&quot;z_0&quot;, &quot;alpha&quot;)
+
+  # Running the model
+  model &lt;- jags.model( textConnection(jags_model_string), data_list, 
+                       n.chains = 4, n.adapt= 1000)
+  update(model, 1000); # Burning 1000 samples to the MCMC gods...
+  mcmc_samples &lt;- coda.samples(model, params_to_monitor, n.iter=10000, thin = 10)
+  
+  z_array &lt;- cbind(mcmc_samples[[1]][, &quot;z_0&quot;], mcmc_samples[[2]][, &quot;z_0&quot;],
+                   mcmc_samples[[3]][, &quot;z_0&quot;], mcmc_samples[[4]][, &quot;z_0&quot;])
+  
+  prob_null_jags &lt;- mean(z_array == 0)
+  prob_null_jags
+  bf_jags &lt;- prob_null_jags / (1 - prob_null_jags)
+  bf_jags
+  data.frame(method = &quot;super_jags&quot;, bf = bf_jags, prob_null = prob_null_jags)
+}</code></pre>
+<pre class="r"><code>comparisons_file &lt;- paste0(cache_dir, &quot;/comparison.rds&quot;)
+if(!file.exists(comparisons_file)) {
+  set.seed(3384528)
+  res_list &lt;- list()
+  for(i in 1:50) {
+    use_null &lt;- (i %% 2) == 0
+    N &lt;- 2 +  rnbinom(1, mu = 10, size = 1)
+    if(use_null) {
+      mu &lt;- 0
+    } else {
+      mu &lt;- rnorm(1, 0, 2)
+    }
+    y &lt;- rnorm(10, mu, sd = 1)
+    res_list[[i]] &lt;- rbind(bf_prior(y), 
+                           bf_brms(y), 
+                           bf_super_jags(y), 
+                           bf_super_stan(y)) 
+    res_list[[i]]$id = i
+    res_list[[i]]$null_true = use_null
+    res_list[[i]]$N = N
+  }
+  res &lt;- do.call(rbind, res_list)
+  saveRDS(res, comparisons_file)
+} else {
+  res &lt;- readRDS(comparisons_file)
+}</code></pre>
+<p>We note that some Bayes factors - exclusively those computed by the unmarginalized
+JAGS model are 0. This is unsurprising, as the 10000-iteration JAGS model loses
+ability to capture very low null probabilities and hence low Bayes factors - looking
+at the analytically computed Bayes factors of those problematic results they are invariably very low.</p>
+<pre class="r"><code># Contrast the BFs with the &quot;prior&quot; (analytically computed) 
+comparisons_to_plot &lt;- res %&gt;% group_by(id) %&gt;%
+  mutate(bf_prior = bf[method == &quot;prior&quot;], 
+         prob_null_prior = bf[method == &quot;prior&quot;]) %&gt;%
+  ungroup() %&gt;%
+  filter(method != &quot;prior&quot;)
+
+zero_bf &lt;- comparisons_to_plot %&gt;% filter(bf == 0)
+if(!identical(unique(zero_bf$method), &quot;super_jags&quot;)){
+  stop(&quot;Bad assumption&quot;)
+}
+nrow(zero_bf)</code></pre>
+<pre><code>## [1] 11</code></pre>
+<pre class="r"><code>zero_bf$bf_prior</code></pre>
+<pre><code>##  [1] 1.242613e-37 3.423453e-23 3.619076e-09 1.497207e-21 4.917385e-10
+##  [6] 2.431973e-14 2.176901e-20 2.514081e-53 1.366711e-13 8.921497e-07
+## [11] 1.321580e-05</code></pre>
+<p>We’ll exclude those invalid Bayes factors from further consideration.</p>
+<pre class="r"><code>comparisons_to_plot &lt;- comparisons_to_plot %&gt;% filter(bf &gt; 0)</code></pre>
+<p>We can now plot the results of the various Monte carlo methods against the analytical results:</p>
+<pre class="r"><code>base_comparisons_plot &lt;- function(comparisons, x, y, trans, breaks = waiver()) {
+comparisons %&gt;% 
+  sample_frac() %&gt;% #random reorder
+  ggplot(aes(x = {{x}}, y = {{y}}, color = method, shape = method)) +
+  geom_abline(slope = 1, intercept = 0, color = &quot;black&quot;) +
+  geom_point(size = 3, alpha = 0.8) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  scale_x_continuous(trans = trans, breaks = breaks) +
+  scale_y_continuous(trans = trans, breaks = breaks)
+  
+}
+
+base_comparisons_plot(comparisons_to_plot, bf_prior, bf, trans = &quot;log&quot;,
+                      breaks = c(1e-45, 1e-30,1e-15, 1))</code></pre>
+<p><img src="/post/2021-bayes-factors_files/figure-html/unnamed-chunk-17-1.png" width="672" />
+We immediately see that only the marginalized Stan model keeps high agreement for
+the very low Bayes factors (yay marginalization!).</p>
+<p>We can also zoom in on the upper-right area, where we see pretty good agreement between
+all methods.</p>
+<pre class="r"><code>base_comparisons_plot(comparisons_to_plot %&gt;% filter(bf_prior &gt; 1e-3), 
+                      bf_prior, bf, trans = &quot;log&quot;,
+                      breaks = c(1e-3, 1e-2,1e-1, 1, 10))</code></pre>
+<p><img src="/post/2021-bayes-factors_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+</div>
+<div id="calibration" class="section level2">
+<h2>Calibration</h2>
+<p>Following the method outline by Schad et al. we also check the calibration of our Bayes factors.
+Since the model has analytical solution, our simulations are going to be much cheaper than in actual practice and we can do a lot of them.</p>
+<pre class="r"><code>  N_calibration &lt;- 20 # How many values in a dataset
+  set.seed(5487654)
+  res_cal_list &lt;- list()
+  for(i in 1:5000) {
+    use_null &lt;- (i %% 2) == 0
+    if(use_null) {
+      mu &lt;- 0
+    } else {
+      mu &lt;- rnorm(1, 0, 2)
+    }
+    y &lt;- rnorm(N_calibration, mu, sd = 1)
+    res_cal_list[[i]] &lt;- bf_prior(y)
+    res_cal_list[[i]]$null_true = use_null
+  }
+  calibration &lt;- do.call(rbind, res_cal_list)</code></pre>
+<p>As a quick heuristic, reflecting some common usage, we will interpret BF &gt; 3 as weak evidence and BF &gt; 10 as strong evidence.
+If we do this, this is how our results look like based on whether the null is actually true:</p>
+<pre class="r"><code>calibration %&gt;% group_by(null_true) %&gt;%
+  summarise(strong_null = mean(bf &gt;= 10),
+            weak_null = mean(bf &gt;= 3 &amp; bf &lt; 10),
+            no_evidence = mean(bf &lt; 3 &amp; bf &gt; 1/3), 
+            weak_intercept = mean(bf &lt;= 1/3 &amp; bf &gt; 0.01),
+            strong_intercept = mean(bf &lt;= 0.01), .groups = &quot;drop&quot;) %&gt;%
+  table_format()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">null_true</th>
+<th align="right">strong_null</th>
+<th align="right">weak_null</th>
+<th align="right">no_evidence</th>
+<th align="right">weak_intercept</th>
+<th align="right">strong_intercept</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">FALSE</td>
+<td align="right">0</td>
+<td align="right">0.1364</td>
+<td align="right">0.0852</td>
+<td align="right">0.0924</td>
+<td align="right">0.686</td>
+</tr>
+<tr class="even">
+<td align="left">TRUE</td>
+<td align="right">0</td>
+<td align="right">0.8572</td>
+<td align="right">0.1328</td>
+<td align="right">0.0100</td>
+<td align="right">0.000</td>
+</tr>
+</tbody>
+</table>
+<p>We see that in the case of observing 20 values, this simple heuristic makes a potentially non-intuitive trade-off where low rates of wrongly claiming support for the intercept model, the maternal uncle of despair, are balanced by low rates of correctly finding strong support for the null model and by somewhat large rate of finding weak evidence in favor of the null model, even when this model was not used to simulate data.</p>
+<p>This is just to illustrate the point made by Schad et al. that explicit calibration and decision analysis should be done in the context of a given experimental design and utility/cost of actual decisions. But wan can be safe in the knowledge that the poor null model is unlikely to suffer unjust rejections in this case.</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>Bayes factors are not very intuitive, but I hope that understanding that the same number can be understood as either being a ratio of prior predictive densities or from a larger model taking the candidate models as components could help improve the intuition. In line with the (better, more thoroughly done) results of Schad et al. we also observe that computation of Bayes factors cannot be taken for granted and that simple heuristics to interpret Bayes factors may have non-obvious implications.</p>
+<p>Now go read <a href="https://arxiv.org/abs/2103.08744">Workflow Techniques for the Robust Use of Bayes Factors</a>!</p>
+</div>

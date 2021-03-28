@@ -5,7 +5,7 @@ theme = "hugo-tanka"
 author = "Martin Modrák"
 canonifyurls = true
 languagecode = "en"
-googleAnalytics = "UA-113619876-1"
+googleAnalytics = ""
 disqusShortname = "martinmodrak"
 ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$","\\.nb\\.html$"]
 
@@ -57,3 +57,8 @@ pygmentscodefences = true
 
     #MathJaxCDN = "//cdn.bootcss.com"
     #MathJaxVersion = "2.7.1"
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
