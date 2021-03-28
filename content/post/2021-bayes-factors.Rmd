@@ -1,11 +1,11 @@
 ---
-title: "Three ways to compute Bayes Factors"
+title: "Three ways to compute a Bayes factor"
 date: 2021-03-28
-tags: ["R","Stan","Bayes Factors"]
+tags: ["R","Stan","Bayes Factor"]
 ---
 
 
-This post was inspired by a very interesting paper on Bayes Factors: 
+This post was inspired by a very interesting paper on Bayes factors: 
 [Workflow Techniques for the Robust Use of Bayes Factors](https://arxiv.org/abs/2103.08744) 
 by Schad, Nicenboim, Bürkner, Betancourt and Vasishth. 
 I would specifically recommend it for its introduction into what actually is a hypothesis
@@ -85,7 +85,7 @@ y <- rnorm(N, mean = alpha, sd = 1)
 ```
 
 
-This comparison is roughly the Bayesian alternative of a single sample t-test.
+This comparison is basically the Bayesian alternative of a single sample t-test with fixed variance - so very simple indeed.
 
 Finally let's prepare some data for our contestants to chew on:
 
