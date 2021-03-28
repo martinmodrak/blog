@@ -1,11 +1,9 @@
-
 data {
   int K;
   vector[K] y;
 }
 
 parameters {
-  real<lower=0, upper=1> s;
   real alpha;
 }
 
@@ -15,6 +13,6 @@ transformed parameters {
 }
 
 model {
-    target += log_mix(s, log_lik_null, log_lik_intercept);
+    target += log_mix(0.5, log_lik_null, log_lik_intercept);
     target += normal_lpdf(alpha | 0, 2);
 }
