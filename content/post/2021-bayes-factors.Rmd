@@ -314,8 +314,7 @@ you say? This can be overcome!
 
 _Warning: I had a lot of trouble thinking clearly about the rest of this section, so it is possible, there are mistakes or stuff is confusing. Please let me know, if you find the reasoning problematic/unclear/unconvincing._
 
-The important point is called marginalization and there is more discussion in the [Stan User's guide](https://mc-stan.org/docs/2_26/stan-users-guide/latent-discrete-chapter.html).
-The point is that we can express the unnormalized density $p(\alpha, \mathbf{y})$ as:
+The important point is called marginalization and there is a neat intro to it in the [preprint for the `rater` package](https://arxiv.org/abs/2010.09335). More discussion and examples are in the [Stan User's guide](https://mc-stan.org/docs/2_26/stan-users-guide/latent-discrete-chapter.html). The point is that we can express the unnormalized density $p(\alpha, \mathbf{y})$ as:
 
 $$
 \mathcal{M}_{super-marginalized}: \\
@@ -383,6 +382,8 @@ If we treat the model selection as fitting the super model with the candidates a
 
 But we have many good ways to detect model misspecification, including prior and posterior predictive checks and other steps outlined in the [Bayesian workflow preprint](https://arxiv.org/abs/2011.01808). So it would be interesting to test whether there is something to be gained by running prior and posterior predictive checks (or other diagnostics), not only for the component models, but for the "supermodel" implied by the selection scheme. But I'll that to people who actually want to use Bayes factors :-D.
 
+
+I'll further note that I tried to implemented a supermodel with two realistic models and it appears that such supermodels can be challenging to fit (my impression is that the problem is primarily in initialization, but I didn't investigate thoroughly).
 
 ## Broader comparison
 

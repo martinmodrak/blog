@@ -233,6 +233,7 @@ which (as shown above) we can transform into a Bayes factor.</p>
 if not very efficiently:</p>
 <pre class="r"><code>suppressPackageStartupMessages(library(rjags))</code></pre>
 <pre><code>## Warning: package &#39;rjags&#39; was built under R version 4.0.4</code></pre>
+<pre><code>## Warning: package &#39;coda&#39; was built under R version 4.0.4</code></pre>
 <pre class="r"><code>data_list &lt;- list(
     y = y)
 
@@ -269,15 +270,15 @@ mcmc_samples &lt;- coda.samples(model, params_to_monitor, n.iter=10000, thin = 1
 alpha_array &lt;- cbind(mcmc_samples[[1]][, &quot;alpha&quot;], mcmc_samples[[2]][, &quot;alpha&quot;],
                      mcmc_samples[[3]][, &quot;alpha&quot;], mcmc_samples[[4]][, &quot;alpha&quot;])
 posterior::rhat(alpha_array)</code></pre>
-<pre><code>## [1] 0.9997615</code></pre>
+<pre><code>## [1] 0.9997451</code></pre>
 <pre class="r"><code>posterior::ess_bulk(alpha_array)</code></pre>
-<pre><code>## [1] 3790.424</code></pre>
+<pre><code>## [1] 3933.771</code></pre>
 <pre class="r"><code>z_array &lt;- cbind(mcmc_samples[[1]][, &quot;z_0&quot;], mcmc_samples[[2]][, &quot;z_0&quot;],
                  mcmc_samples[[3]][, &quot;z_0&quot;], mcmc_samples[[4]][, &quot;z_0&quot;])
 posterior::rhat(z_array)</code></pre>
-<pre><code>## [1] 0.9995078</code></pre>
+<pre><code>## [1] 1.000557</code></pre>
 <pre class="r"><code>posterior::ess_bulk(z_array)</code></pre>
-<pre><code>## [1] 3869.49</code></pre>
+<pre><code>## [1] 4013.534</code></pre>
 <p>Posterior probability of the data being from the null model (<span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y})\)</span>),
 is then simply the <span class="math inline">\(P(z = 1 | \mathbf{y}) = P(z_0 = 0 | \mathbf{y})\)</span> which can be
 directly extracted from the samples.</p>
@@ -297,8 +298,8 @@ rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">super_jags</td>
-<td align="right">3.836759</td>
-<td align="right">0.7932500</td>
+<td align="right">3.950495</td>
+<td align="right">0.7980000</td>
 </tr>
 <tr class="even">
 <td align="left">prior</td>
@@ -316,8 +317,7 @@ rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
 <p>But we obviously want to do this in Stan. But Stan doesn’t handle discrete parameters
 you say? This can be overcome!</p>
 <p><em>Warning: I had a lot of trouble thinking clearly about the rest of this section, so it is possible, there are mistakes or stuff is confusing. Please let me know, if you find the reasoning problematic/unclear/unconvincing.</em></p>
-<p>The important point is called marginalization and there is more discussion in the <a href="https://mc-stan.org/docs/2_26/stan-users-guide/latent-discrete-chapter.html">Stan User’s guide</a>.
-The point is that we can express the unnormalized density <span class="math inline">\(p(\alpha, \mathbf{y})\)</span> as:</p>
+<p>The important point is called marginalization and there is a neat intro to it in the <a href="https://arxiv.org/abs/2010.09335">preprint for the <code>rater</code> package</a>. More discussion and examples are in the <a href="https://mc-stan.org/docs/2_26/stan-users-guide/latent-discrete-chapter.html">Stan User’s guide</a>. The point is that we can express the unnormalized density <span class="math inline">\(p(\alpha, \mathbf{y})\)</span> as:</p>
 <p><span class="math display">\[
 \mathcal{M}_{super-marginalized}: \\
 p(\alpha, \mathbf{y}) = p(\alpha)p(\mathbf{y}| \alpha) \\
@@ -362,21 +362,21 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 <pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
 ## 
 ## Chain 1 finished in 0.3 seconds.
-## Chain 3 finished in 0.2 seconds.
-## Chain 2 finished in 0.3 seconds.
+## Chain 2 finished in 0.4 seconds.
+## Chain 3 finished in 0.3 seconds.
 ## Chain 4 finished in 0.3 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 0.3 seconds.
-## Total execution time: 0.4 seconds.</code></pre>
+## Mean chain execution time: 0.4 seconds.
+## Total execution time: 0.5 seconds.</code></pre>
 <pre class="r"><code>fit_super$summary() %&gt;% table_format()</code></pre>
 <table>
 <colgroup>
 <col width="16%" />
 <col width="11%" />
-<col width="9%" />
-<col width="9%" />
-<col width="9%" />
+<col width="10%" />
+<col width="10%" />
+<col width="8%" />
 <col width="10%" />
 <col width="9%" />
 <col width="8%" />
@@ -400,34 +400,34 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 <tbody>
 <tr class="odd">
 <td align="left">lp__</td>
-<td align="right">-6.5495171</td>
-<td align="right">-6.392370</td>
-<td align="right">0.846627</td>
-<td align="right">0.7723234</td>
-<td align="right">-8.126371</td>
-<td align="right">-5.703839</td>
-<td align="right">1.000461</td>
-<td align="right">10646.67</td>
-<td align="right">11092.02</td>
+<td align="right">-6.5500559</td>
+<td align="right">-6.3973750</td>
+<td align="right">0.8351213</td>
+<td align="right">0.777557</td>
+<td align="right">-8.143562</td>
+<td align="right">-5.702910</td>
+<td align="right">1.000295</td>
+<td align="right">11109.72</td>
+<td align="right">11929.15</td>
 </tr>
 <tr class="even">
 <td align="left">alpha</td>
-<td align="right">0.0332668</td>
-<td align="right">0.099167</td>
-<td align="right">1.775121</td>
-<td align="right">1.4292531</td>
-<td align="right">-3.046384</td>
-<td align="right">3.035032</td>
-<td align="right">1.000484</td>
-<td align="right">10806.29</td>
-<td align="right">11107.90</td>
+<td align="right">0.0162464</td>
+<td align="right">0.0981009</td>
+<td align="right">1.7726911</td>
+<td align="right">1.438439</td>
+<td align="right">-3.067508</td>
+<td align="right">2.972789</td>
+<td align="right">1.000240</td>
+<td align="right">10600.70</td>
+<td align="right">11100.30</td>
 </tr>
 <tr class="odd">
 <td align="left">log_lik_null</td>
 <td align="right">-4.1307500</td>
-<td align="right">-4.130750</td>
-<td align="right">0.000000</td>
+<td align="right">-4.1307500</td>
 <td align="right">0.0000000</td>
+<td align="right">0.000000</td>
 <td align="right">-4.130750</td>
 <td align="right">-4.130750</td>
 <td align="right">NA</td>
@@ -436,15 +436,15 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 </tr>
 <tr class="even">
 <td align="left">log_lik_intercept</td>
-<td align="right">-10.4049821</td>
-<td align="right">-5.890015</td>
-<td align="right">10.651210</td>
-<td align="right">2.6682723</td>
-<td align="right">-31.514770</td>
-<td align="right">-4.041499</td>
-<td align="right">1.000448</td>
-<td align="right">10713.53</td>
-<td align="right">10955.21</td>
+<td align="right">-10.4013700</td>
+<td align="right">-5.9333600</td>
+<td align="right">10.4287565</td>
+<td align="right">2.733907</td>
+<td align="right">-31.625405</td>
+<td align="right">-4.040298</td>
+<td align="right">1.000229</td>
+<td align="right">11078.21</td>
+<td align="right">11884.79</td>
 </tr>
 </tbody>
 </table>
@@ -472,13 +472,13 @@ rbind(res_stan, res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre
 <tbody>
 <tr class="odd">
 <td align="left">super_stan</td>
-<td align="right">3.679570</td>
-<td align="right">0.7863052</td>
+<td align="right">3.711144</td>
+<td align="right">0.7877373</td>
 </tr>
 <tr class="even">
 <td align="left">super_jags</td>
-<td align="right">3.836759</td>
-<td align="right">0.7932500</td>
+<td align="right">3.950495</td>
+<td align="right">0.7980000</td>
 </tr>
 <tr class="odd">
 <td align="left">prior</td>
@@ -498,6 +498,7 @@ I cannot reliably estimate if <span class="math inline">\(P(z = 1) &lt; 10^{-3}\
 <p>Viewing Bayes factors as derived from posterior probabilities of an index over candidate models (<span class="math inline">\(z\)</span> in our case), puts a different angle on the distinction between <span class="math inline">\(\mathcal{M}\)</span>-closed scenarios (the true model is among the models we compare) and <span class="math inline">\(\mathcal{M}\)</span>-open / <span class="math inline">\(\mathcal{M}\)</span>-complete where this is not the case.</p>
 <p>If we treat the model selection as fitting the super model with the candidates as submodels, being in an <span class="math inline">\(\mathcal{M}\)</span>-open scenario simply means that the super model is misspecified. Unfortunately, as discussed above, Bayes factors can be very sensitive to both prior and likelihood specification, where other approaches, e.g. approximate leave-one-out cross validation with <code>loo</code> is usually less sensitive to priors and less often overconfident in face of misspecifaction (see e.g. <a href="https://projecteuclid.org/journals/bayesian-analysis/volume-13/issue-3/Using-Stacking-to-Average-Bayesian-Predictive-Distributions-with-Discussion/10.1214/17-BA1091.full">Using Stacking to Average Bayesian Predictive Distributions</a> by Yao et al. for more discussion).</p>
 <p>But we have many good ways to detect model misspecification, including prior and posterior predictive checks and other steps outlined in the <a href="https://arxiv.org/abs/2011.01808">Bayesian workflow preprint</a>. So it would be interesting to test whether there is something to be gained by running prior and posterior predictive checks (or other diagnostics), not only for the component models, but for the “supermodel” implied by the selection scheme. But I’ll that to people who actually want to use Bayes factors :-D.</p>
+<p>I’ll further note that I tried to implemented a supermodel with two realistic models and it appears that such supermodels can be challenging to fit (my impression is that the problem is primarily in initialization, but I didn’t investigate thoroughly).</p>
 </div>
 <div id="broader-comparison" class="section level2">
 <h2>Broader comparison</h2>
