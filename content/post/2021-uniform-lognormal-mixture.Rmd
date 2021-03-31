@@ -1,0 +1,263 @@
+---
+title: "Using brms to model reaction times contaminated with errors"
+date: 2021-03-31
+tags: ["R","Stan","reaction times"]
+---
+
+
+Nathaniel Haines made a [neat tweet](https://twitter.com/Nate__Haines/status/1377085208588120070) showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (random key press?) or implausibly large reaction times (lapses in judgement?). That definitely makes more 
+sense than just throwing away such data. Few people asked, if you can do that in `brms`. And while Nathaniel didn't have a `brms` code ready, I assure you that, yes, it is possible in `brms` and I'll show you the code.
+
+If I understood Nathaniel's tweets correctly, he assumes that there is a shifted lognormal representing the actual decision process and a uniform distribution modelling the contamination. For this to make sense, we need to have some upper limit representing the maximum times we could have observed. In any case, the limit should be larger than the maximum time we observed. We then assume that each trial has a small probability of being contaminated.
+
+Here is how generating a single data point for such a model could look in R code:
+
+```
+shift <- 0.1 # Shortest reaction time possible if not contaminated
+mu <- log(0.5)
+sigma <- 0.6
+mix <- 0.06 # Probability of contamination
+upper <- 5 # Maximum time
+
+if(runif(1) < mix) {
+  # Contaminated
+  y <- runif(1, 0, upper)
+} else {
+  repeat {
+    # Sample until we get a time within the limit
+    y <- shift + rlnorm(1, mu, sigma)
+    if(y < upper) {
+      break;
+    }
+  }
+}
+```
+
+Technically, we call the lognormal distribution here _truncated_ because it is not allowed to take values larger then `upper`. It should however be noted that in practice we want `upper` to be large enough that this truncation doesn't really matter.
+
+TODO show the same as math.
+
+Of the model parameters, we take `shift` and `upper` as known (but possibly differ between obserations) while `mu`, `sigma` and `mix` are to be estimated and can depend on predictors.
+Taking `shift` as variable is a bit problematic but could be done, if care is taken. 
+
+
+At the end of the post we will be able to write models like 
+
+```
+brm(bf(y | vreal(shift, upper) ~ 1 + condition + (1 | subject_id),
+       sigma ~ condition,
+       mix ~ (1 | subject_id),
+       family = RTmixture), ...)
+```
+
+Actually, `brms` has good support for mixtures, but our model breaks one of the core assumptions of `brms`: that every family has at least one parameter to be estimated - our uniform distribution however does not have that. So instead we'll have to implement a full blown custom family. 
+
+The necessary background for implementing custom familis in `brms` can be found in 
+the [vignetter on custom distributions](http://paul-buerkner.github.io/brms/articles/brms_customfamilies.html).
+
+
+Let's set up and get our hands dirty.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(cmdstanr)
+library(brms)
+library(tidyverse)
+library(knitr)
+library(patchwork)
+
+ggplot2::theme_set(cowplot::theme_cowplot())
+options(mc.cores = parallel::detectCores(), brms.backend = "cmdstanr")
+
+cache_dir <- "_RTmixture_cache"
+if(!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}
+
+```
+
+
+First, we'll generate some fake data to test the model against. Below is just a more
+concise and optimized version of the random generation scheme I showed earlier.
+
+
+```{r}
+rRTmixture <- function(n, meanlog, sdlog, mix, shift, upper) {
+  # Using truncnorm package to generate truncated normal values
+  log_truncnorm <- truncnorm::rtruncnorm(n, a = -Inf, b = log(upper - shift), mean = meanlog, sd = sdlog)
+  ifelse(runif(N) < mix, runif(N, 0, upper), shift + exp(log_truncnorm))
+}
+```
+
+Then let us generate some data
+
+```{r}
+set.seed(121658465)
+# Bounds of the data
+shift <- 0.1
+upper <- 5
+mix <- 0.05
+
+N <- 100
+Intercept <- 0.3
+beta <- 0.5
+X <- rnorm(N)
+mu <- rep(Intercept, N) + beta * X
+sigma <- 0.5
+
+y <- rRTmixture(N, meanlog = mu, sdlog = sigma, mix = mix, shift = shift, upper = upper)
+
+dd <- data.frame(y = y, x = X, shift = shift, upper = upper)
+```
+
+Looking nice!
+
+```{r}
+hist(dd$y, breaks = 10)
+
+```
+
+
+Now we need the Stan implementation of the family. That is probably the most technical part.
+We'll note that times before `shift` can only come from the uniform component. 
+For others we mix both a truncated lognormal and the uniform via `log_mix`.
+
+With the Stan code ready, we then define the parameters of the distribution in
+ a way that brms understands.
+
+```{r}
+stan_funs <- stanvar(block = "functions", scode = "
+  real RTmixture_lpdf(real y, real mu, real sigma, real mix, 
+                      real shift, real upper) {
+    real unif_llh = uniform_lpdf(y | 0, upper);
+    if(y < 0 || y > upper) {
+      reject(\"Observed value outside of the [0,upper] range.\");
+    }
+    if(y < shift) {
+      //Could only be created by the contamination
+      return log(mix) + unif_llh;
+    } else {
+      real normalization = lognormal_lcdf(upper - shift | mu, sigma);
+      real lognormal_llh = lognormal_lpdf(y - shift | mu, sigma) - normalization;
+        
+      return log_mix(mix, unif_llh, lognormal_llh);
+    }
+  }
+")
+
+RTmixture <- custom_family(
+  "RTmixture", 
+  dpars = c("mu", "sigma", "mix"), # Those will be estimated
+  links = c("identity", "log", "logit"),
+  type = "real",
+  lb = c(NA, 0, 0), # bounds for the parameters 
+  ub = c(NA, NA, 1),
+  vars = c("vreal1[n]", "vreal2[n]")) # Two other values are known
+```
+
+And we are ready to fit! We will put a weakly informative `beta(1,5)` prior on the proportion of 
+contamination - this means we a prior believe that there is a 95% chance that the contamination is lower than `qbeta(0.95, 1, 5) = `r qbeta(0.95, 1, 5)` `. One could definitely be justified in tightening this prior even further toward zero for many tasks. 
+
+```{r}
+fit_mix <- brm(y | vreal(shift, upper) ~ x, data = dd, family = RTmixture, stanvars = stan_funs, 
+               refresh = 0,
+               file = paste0(cache_dir, "/mix"), file_refit = "on_change",
+               prior = c(prior(beta(1, 5), class = "mix")))
+fit_mix
+```
+
+We note that we have quite good recovery of the effect of `x` (simulated as `r beta`)
+and of `sigma`, but 100 observations are not enough to constrain the `mix` parameter really well (simulated as `r mix`).
+
+For comparison, we also fit the default shifted lognormal as implemented in `brms`.
+
+
+```{r}
+fit_base <- brm(y ~ x, data = dd, family = shifted_lognormal, refresh = 0,
+                file = paste0(cache_dir, "/base"), file_refit = "on_change")
+
+fit_base
+```
+
+The effect of `x` is a bit biased but this is not necessarily only due to the mixture,
+another potentially biasing is the truncation and different handling of the shift.
+
+We could fit, but there are a few tweaks we need to do to make full use of the model.
+We might for example want to make predictions from the model, so we also need to implement that:
+
+```{r}
+posterior_predict_RTmixture <- function(i, prep, ...) {
+  mu <- prep$dpars$mu[, i]
+  mix <- prep$dpars$mix
+  sigma <- prep$dpars$sigma
+  shift <- prep$data$vreal1[i]
+  upper <- prep$data$vreal2[i]
+  rRTmixture(1, meanlog = mu, sdlog = sigma, 
+                         mix = mix, shift = shift, upper = upper)
+}
+```
+
+With that, we can do a posterior predictive check for both models:
+
+```{r, warning=FALSE}
+pp_mix <- pp_check(fit_mix, type = "dens_overlay", nsamples = 20,  cores = 1)  + ggtitle("Mixture & truncation")
+pp_base <- pp_check(fit_base, type = "dens_overlay", nsamples = 20,  cores = 1) + ggtitle("Shifted lognormal")
+pp_mix + pp_base
+```
+
+Similarly, we might want to do model comparison or stacking with `loo`, so we also implement
+the `log_lik` function.
+
+```{r}
+## Needed for numerical stability
+## from http://tr.im/hH5A
+logsumexp <- function (x) {
+  y = max(x)
+  y + log(sum(exp(x - y)))
+}
+
+
+RTmixture_lpdf <- function(y, meanlog, sdlog, mix, shift, upper) {
+    unif_llh = dunif(y , min = 0, max = upper, log = TRUE)
+    lognormal_llh = dlnorm(y - shift, meanlog = meanlog, sdlog = sdlog, log = TRUE) - 
+      plnorm(upper - shift, meanlog = meanlog, sdlog = sdlog, log.p = TRUE)
+    
+    
+    # Computing logsumexp(log(mix) + unif_llh, log1p(-mix) + lognormal_llh)    
+    # but vectorized
+    llh_matrix <- array(NA_real_, dim = c(2, max(length(unif_llh), length(lognormal_llh))))
+    llh_matrix[1,] <- log(mix) + unif_llh
+    llh_matrix[2,] <- log1p(-mix) + lognormal_llh
+    apply(llh_matrix, MARGIN = 2, FUN = logsumexp)
+}
+
+log_lik_RTmixture <- function(i, draws) {
+  mu <- draws$dpars$mu[, i]
+  mix <- draws$dpars$mix
+  sigma <- draws$dpars$sigma
+  lower <- draws$data$vreal1[i]
+  upper <- draws$data$vreal2[i]
+  y <- draws$data$Y[i]
+  RTmixture_lpdf(y, meanlog = mu, sdlog = sigma, 
+                         mix = mix, shift = shift, upper = upper)
+
+}
+```
+
+
+And we can compare the models:
+
+```{r}
+fit_mix <- add_criterion(fit_mix, "loo", cores = 1)
+fit_base <- add_criterion(fit_base, "loo", cores = 1)
+loo_compare(fit_mix, fit_base)
+```
+
+No surprise here - we simulated the data with the mixture model and indeed, this is preferred to a different model.
+
+
+## Original computing environment 
+
+```{r}
+sessionInfo()
+```
+
