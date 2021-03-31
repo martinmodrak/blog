@@ -1,6 +1,7 @@
 ---
 title: "Using brms to model reaction times contaminated with errors"
 date: 2021-03-31
+draft:true
 tags: ["R","Stan","reaction times"]
 ---
 
