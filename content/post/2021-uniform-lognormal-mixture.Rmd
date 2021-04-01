@@ -5,9 +5,11 @@ tags: ["R","Stan","reaction times"]
 ---
 
 
-Nathaniel Haines made a [neat tweet](https://twitter.com/Nate__Haines/status/1377085208588120070) showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (random key press?) or implausibly large reaction times (lapses in judgement?). Such a model often makes more sense than just throwing away a part of the data. Few people asked, if you can do that in `brms`. This started a vortex of productive procrastrination on my side - it sure should be easy to do this, right?  And while Nathaniel didn't have a `brms` code ready, I assure you that, yes, it is possible in `brms`, it is not completely straightforward, but I'll show you the ~~path~~ code.
+Nathaniel Haines made a [neat tweet](https://twitter.com/Nate__Haines/status/1377085208588120070) showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (e.g., if people make an anticipatory response that is not actually based on processing the stimulus of interest) or implausibly large reaction times (e.g., if their attention drifts away from the task, but they snap back to it after having "zoned out" for a few seconds).  Response times that arise from such processes are not actually what we aim to measure in most cognitive tasks — we are instead interested in how people process and respond to a particular stimulus. Therefore, by explicitly modeling these "contamination" response times, we can get better estimates of the decision-making parameters that we actually care about. Such a model often makes more sense than just throwing away a part of the data. 
 
-Nathaniel was kind enough to provide a bit of feedback on the post (I have no experience with reaction-time data or cogsci in general), but I should repeat that the clarity of the idea is his while all errors are mine.
+Several people asked, if you can do that in `brms`. This started a vortex of productive procrastrination on my side - it sure should be easy to do this, right?  And while Nathaniel didn't have a `brms` code ready, I assure you that, yes, it is possible in `brms`, it is not completely straightforward, but I'll show you the ~~path~~ code.
+
+Nathaniel was kind enough to provide a bit of feedback on the post (I have no experience with reaction-time data or cogsci in general), but I should repeat that the clarity of the idea is his while all errors are mine. The overall idea of using mixtures of "real" and "contaminating" distributions to model responses is however not new - see e.g. [Ratcliff & Tuerlinckx 2002](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2474747/).
 
 In this model we will take a shifted lognormal representing the actual decision process and a uniform distribution modelling the contamination. For this to make sense, we need to have some upper limit on the possible contamination times, representing the maximum times we could have observed. In most cases, the limit should be larger than the maximum time we observed, although this is not strictly mathematically necessary. We then assume that each trial has a small probability of being contaminated.
 
@@ -48,11 +50,11 @@ Where $\theta$ corresponds to `mix`, $\alpha$ to `upper` and $s_i$ to `shift`.
 Technically, the non-contaminated signal is allowed to take values larger than `upper`. In practice we would however usually want `upper` to be large enough that larger values do not really occur.
 
 There is one important detail in how `brms` does handle the shifted lognormal: `brms` does treat `shift` as unknown and estimates it, but does not allow the `shift` parameter to be larger than any actually observed `y`. We will therefore mimic this behaviour, but since we also have the contamination process, `shift` can in principle be larger than some `y`. 
-This can potentially introduce problems for the sampler as the posterior density is not smooth when `shift` crosses some of the observed values (the lognormal component is added/removed, resulting in a sharp change). 
+This can potentially introduce problems for the sampler as the posterior density is not smooth when `shift` crosses some of the observed `y` values (the lognormal component is added/removed, resulting in a sharp change). 
 
-It however turns out that if `shift` crossing some `y` is rare enough, the sampling works just fine. To ensure this rarity we introduce `max_shift` as the upper bound for `shift`. In most cases, this will be the same for the whole dataset. Instead of `shift`, the model would then work with `shiftprop = shift / max_shift` - a value between 0 and 1 that is easier to work with.
+It however turns out that if `shift` crossing some `y` is rare enough, the sampling works just fine. To ensure this rarity we introduce `max_shift` as the upper bound for `shift`. In most cases, this will be the same for the whole dataset. Instead of `shift`, the model would then work with `shiftprop = shift / max_shift` - a value between 0 and 1 that is easier to work with mathematically.
 
-Of the model parameters, we take `max_shift` and `upper` as known (but possibly differ between observations) while `mu`, `sigma`, `mix` and `shiftprop` are to be estimated and can depend on predictors. However, `shiftprop` is a bit complicated here and the model will make most sense if observations that have different `max_shift` are also allowed to have different `shiftprop`. But anyway, varying `max_shift` and `shiftprop` is probably not really that useful in practice.
+Of the model parameters, we take `max_shift` and `upper` as known (but possibly differ between observations) while `mu`, `sigma`, `mix` and `shiftprop` are to be estimated and can depend on predictors. However, `shiftprop` is a bit complicated here and the model will make most sense if observations that have different `max_shift` are also allowed to have different `shiftprop` by putting a suitable predictor on `shiftprop`. Different `shiftprop` with the same `max_shift` is however definitely not an issue. So while you need to be careful with varying `max_shift`, varying `shiftprop` is OK, just note the implied logit scale. For a review on why varying `shift` might be important see e.g. [Dully, McGovern & O’Connell 2018](https://www.sciencedirect.com/science/article/pii/S0166432817307520).
 
 For some use cases, one could also want to set the lower bound of the contamination distribution. To keep things simple we don't do that here, but basically the same result can then be achieved by adding/subtracting a suitable number to the response (`y`) and bounds (`max_shift`, `upper`)
 
@@ -259,6 +261,8 @@ fit_mix_cens
 
 It works and the inferences are reasonably close to what we simulated with. A more
 thorough evaluation would require [simulation-based calibration](https://arxiv.org/abs/1804.06788), which would be nice, but would require a bit more energy than I have now. But it seems that at least the models are not completely wrong.
+
+If you want to model varying `shift` but having issues fitting, it might make sense to adjust `max_shift` on a per-group basis to have `max_shift` larger only than a small proportion of observations in this group. As noted above, if you set different `max_shift` per for example `subject_id`, you should also  have `shiftprop ~ subject_id` or the model might not make sense.
 
 ## Making predictions
 
