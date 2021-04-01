@@ -5,7 +5,7 @@ tags: ["R","Stan","reaction times"]
 ---
 
 
-Nathaniel Haines made a [neat tweet](https://twitter.com/Nate__Haines/status/1377085208588120070) showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (random key press?) or implausibly large reaction times (lapses in judgement?). Such a model often makes more sense than just throwing away a part of the data. Few people asked, if you can do that in `brms`. And while Nathaniel didn't have a `brms` code ready, I assure you that, yes, it is possible in `brms` and I'll show you the code.
+Nathaniel Haines made a [neat tweet](https://twitter.com/Nate__Haines/status/1377085208588120070) showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (random key press?) or implausibly large reaction times (lapses in judgement?). Such a model often makes more sense than just throwing away a part of the data. Few people asked, if you can do that in `brms`. This started a vortex of productive procrastrination on my side - it sure should be easy to do this, right?  And while Nathaniel didn't have a `brms` code ready, I assure you that, yes, it is possible in `brms`, it is not completely straightforward, but I'll show you the ~~path~~ code.
 
 Nathaniel was kind enough to provide a bit of feedback on the post (I have no experience with reaction-time data or cogsci in general), but I should repeat that the clarity of the idea is his while all errors are mine.
 
