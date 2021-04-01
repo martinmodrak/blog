@@ -1,6 +1,6 @@
 ---
 title: "Using brms to model reaction times contaminated with errors"
-date: 2021-03-31
+date: 2021-04-01
 tags: ["R","Stan","reaction times"]
 ---
 
@@ -69,12 +69,12 @@ brm(bf(y | vreal(max_shift, upper) + cens(censoring) ~ 1 + condition + (1 | subj
 ```
 
 And let `brms` handle all the rest. The final result, packaged in a single file you
-can just load into your project is at https://github.com/martinmodrak/blog/content/post/RTmixture.R
+can just load into your project is at https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R
 
 You may know that, `brms` has good [support for mixtures](http://paul-buerkner.github.io/brms/reference/mixture.html), so why not just write `family = mixture(uniform, shifted_lognormal)`? It turns out `brms` has as one of its core assumptions that every family has at least one parameter to be estimated - our uniform distribution for the contamination parameter however does not have that and thus cannot be used with `brms` directly. So instead we'll have to implement a full blown custom family. 
 
 The necessary background for implementing custom families in `brms` can be found in 
-the [vignetter on custom distributions](http://paul-buerkner.github.io/brms/articles/brms_customfamilies.html). 
+the [vignette on custom distributions](http://paul-buerkner.github.io/brms/articles/brms_customfamilies.html). 
 Here, we will explain only the more weird stuff.
 
 
@@ -177,11 +177,13 @@ show_section("BASE")
 ```
 
 And we are ready to fit! We will put a weakly informative `beta(1,5)` prior on the proportion of 
-contamination - this means we a prior believe that there is a 95% chance that the contamination is lower than `qbeta(0.95, 1, 5) = `r qbeta(0.95, 1, 5)` `. One could definitely be justified in tightening this prior even further toward zero for many tasks. `vreal` is just `brms`'s way of annotating arbitrary additional data for the distribution.
+contamination - this means we a prior believe that there is a 95% chance that the contamination is lower than `qbeta(0.95, 1, 5) = `r qbeta(0.95, 1, 5)` `. One could definitely be justified in tightening this prior even further toward zero for many tasks. `vreal` is just `brms`'s way of annotating arbitrary additional data for the distribution. We need to pass both
+the family and the associated `stanvars`.
 
 
 ```{r}
-fit_mix <- brm(rt | vreal(max_shift, upper) ~ x, data = dd, family = RTmixture, stanvars = stan_funs_base, 
+fit_mix <- brm(rt | vreal(max_shift, upper) ~ x, data = dd, family = RTmixture, 
+               stanvars = stan_funs_base, 
                refresh = 0,
                file = paste0(cache_dir, "/mix"), file_refit = "on_change",
                prior = c(prior(beta(1, 5), class = "mix")))
@@ -206,7 +208,7 @@ another potentially biasing is the different handling of the shift.
 
 ## Censoring + constant shift
 
-To support censoring in `brms` the family has to come with CDF (cumulative distribution function) and CCDF (complementary CDF) implementations in Stan, which we provide below.
+To support censoring in `brms` the family has to come with log CDF (cumulative distribution function) and log CCDF (complementary CDF) implementations in Stan, which we provide below.
 Those match the `_lpdf` pretty closely.
 
 ```{r, echo = FALSE, comment = ''}
@@ -228,11 +230,14 @@ X <- rnorm(N)
 mu <- rep(Intercept, N) + beta * X
 sigma <- 0.4
 
-rt <- rRTmixture(N, meanlog = mu, sdlog = sigma, mix = mix, shift = shift, upper = upper)
+rt <- rRTmixture(N, meanlog = mu, sdlog = sigma, 
+                 mix = mix, shift = shift, upper = upper)
 censored <- rt > cens_bound
 rt[censored] <- cens_bound
 
-dd_cens <- data.frame(rt = rt, censored = if_else(censored, "right", "none"),  x = X, max_shift = shift, upper = upper)
+dd_cens <- data.frame(rt = rt, 
+                      censored = if_else(censored, "right", "none"),  
+                      x = X, max_shift = shift, upper = upper)
 
 ```
 
@@ -240,11 +245,15 @@ dd_cens <- data.frame(rt = rt, censored = if_else(censored, "right", "none"),  x
 Finally, this model starts to be problematic if we try to estimate `shift` (well, actually  `shiftprop`) as well. An easy way to to make `shift` always equal to `max_shift` is to set a constant prior on `shiftprop`, as we do below.
 
 ```{r}
-fit_mix_cens <- brm(rt | vreal(max_shift, upper) + cens(censored) ~ x, data = dd_cens, family = RTmixture, stanvars = stan_funs, 
-               refresh = 0,
-               file = paste0(cache_dir, "/mix_cens"), file_refit = "on_change",
-               prior = c(prior(beta(1, 5), class = "mix"),
-                         prior(constant(1), class = "shiftprop")))
+fit_mix_cens <- brm(rt | vreal(max_shift, upper) + cens(censored) ~ x, 
+                    data = dd_cens, 
+                    family = RTmixture, 
+                    stanvars = stan_funs, 
+                    refresh = 0,
+                    file = paste0(cache_dir, "/mix_cens"), 
+                    file_refit = "on_change",
+                    prior = c(prior(beta(1, 5), class = "mix"),
+                              prior(constant(1), class = "shiftprop")))
 fit_mix_cens
 ```
 
@@ -254,7 +263,7 @@ thorough evaluation would require [simulation-based calibration](https://arxiv.o
 ## Making predictions
 
 We successfully fitted a few models, but there are some tweaks we need to do to make full use of the family.
-We might for example want to make predictions - e.g. to make posterior predictive checks - so we also need to implement prediction code. You'll notice that we are just extracting the parameters from the prepared predictions and pissing to the generator function.
+We might for example want to make predictions - e.g. to make posterior predictive checks - so we also need to implement prediction code. You'll notice that we are just extracting the parameters from the prepared predictions and passing those to the generator function we defined earlier.
 
 ```{r, echo = FALSE, comment =''}
 show_section("PREDICT")
@@ -265,8 +274,10 @@ Note that the `get_dpar` helper that simplifies some bookeeping is currently int
 With that, we can do a posterior predictive check for both models. We use only single core for predictions, because on Windows, multicore is slow and will not be able to access the custom prediction functions.
 
 ```{r, warning=FALSE}
-pp_mix <- pp_check(fit_mix, type = "dens_overlay", nsamples = 100,  cores = 1)  + ggtitle("Mixture")
-pp_base <- pp_check(fit_base, type = "dens_overlay", nsamples = 100,  cores = 1) + ggtitle("Shifted lognormal")
+pp_mix <- pp_check(fit_mix, type = "dens_overlay", nsamples = 100,  cores = 1)  +
+  ggtitle("Mixture")
+pp_base <- pp_check(fit_base, type = "dens_overlay", nsamples = 100,  cores = 1) +
+  ggtitle("Shifted lognormal")
 pp_mix / pp_base
 ```
 
@@ -282,8 +293,12 @@ pred_cens_cens <- pred_cens
 # Do the censoring
 pred_cens_cens[pred_cens > cens_bound] <- cens_bound 
 samples_dens <- sample(1:(dim(pred_cens)[1]), size = 50)
-ppc_cens1 <- ppc_dens_overlay(dd_cens$rt, pred_cens_cens[samples_dens,])  + ggtitle("Censored dataset")
-ppc_cens2 <- ppc_stat(1.0 * (dd_cens$censored == "right"), 1.0 * (pred_cens >= cens_bound), binwidth = 0.02) + ggtitle("Proportion censored")
+ppc_cens1 <- ppc_dens_overlay(dd_cens$rt, pred_cens_cens[samples_dens,])  + 
+  ggtitle("Censored dataset")
+ppc_cens2 <- ppc_stat(1.0 * (dd_cens$censored == "right"), 
+                      1.0 * (pred_cens >= cens_bound), 
+                      binwidth = 0.02) + 
+  ggtitle("Proportion censored")
 
 ppc_cens1 + ppc_cens2
 ```
@@ -327,8 +342,9 @@ Since `brms` is great, we can now do all sorts of stuff like put predictors on t
 To do this, we'll also put a weakly informative prior on the intercept for the mixture that assumes low contamination and we don't expect huge variability in the amount of contamination (with wider priors the model starts to diverge as we would need much more data to constrain it well).
 
 ```{r}
+set.seed(35486622)
 dd_subj <- dd_cens
-dd_subj$subject_id <- sample(1:8, size = nrow(dd_cens), replace = TRUE)
+dd_subj$subject_id <- sample(1:12, size = nrow(dd_cens), replace = TRUE)
 
 fit_mix_all <- brm(
   bf(rt | vreal(max_shift, upper) + cens(censored) ~ x, 
@@ -348,7 +364,7 @@ fit_mix_all
 Checking that posterior predictions work:
 
 ```{r}
-set.seed(42233)
+set.seed(1233354)
 pred_cens <- posterior_predict(fit_mix_all, cores = 1)
 pred_cens_cens <- pred_cens
 pred_cens_cens[pred_cens > cens_bound] <- cens_bound 
@@ -357,10 +373,10 @@ ppc_dens_overlay(dd_cens$rt, pred_cens_cens[samples_dens,])
 
 ```
 
-We can also do the multivariate models where some of the predictors are correlated across answers:
+We can also do multivariate models where some of the predictors are correlated across answers:
 
 ```{r}
-
+set.seed(0245562)
 # Build a dataset containing two separate predictions
 dd_both <- dd
 dd_both$rt2 <- dd_cens$rt[1:nrow(dd_both)]
@@ -368,7 +384,7 @@ dd_both$x2 <- dd_cens$x[1:nrow(dd_both)]
 dd_both$censored2 <- dd_cens$censored[1:nrow(dd_both)]
 dd_both$max_shift2 <- dd_cens$max_shift[1:nrow(dd_both)]
 dd_both$upper2 <- dd_cens$upper[1:nrow(dd_both)]
-dd_both$subject_id <- sample(1:8, size = nrow(dd_both), replace = TRUE)
+dd_both$subject_id <- sample(1:12, size = nrow(dd_both), replace = TRUE)
 
 fit_mix_multivar <- brm(
   bf(rt | vreal(max_shift, upper)  ~ x, 
@@ -379,21 +395,22 @@ fit_mix_multivar <- brm(
      family = RTmixture),
   data = dd_both,
   stanvars = stan_funs, 
-               refresh = 0,
-               file = paste0(cache_dir, "/mix_multivar"), file_refit = "on_change",
-               prior = c(prior(normal(-3, 1), class = "Intercept", dpar = "mix", resp = "rt"),
-                         prior(normal(0,0.5), class = "sd", dpar = "mix", resp = "rt"),
-                         prior(constant(1), class = "shiftprop", resp = "rt"),
-                         prior(normal(-3, 1), class = "Intercept", dpar = "mix", resp = "rt2"),
-                         prior(normal(0,0.5), class = "sd", dpar = "mix", resp = "rt2"),
-                         prior(constant(1), class = "shiftprop", resp = "rt2")
-                         )
+  refresh = 0,
+  file = paste0(cache_dir, "/mix_multivar"), file_refit = "on_change",
+  prior = c(prior(normal(-3, 1), class = "Intercept", dpar = "mix", resp = "rt"),
+           prior(normal(0,0.5), class = "sd", dpar = "mix", resp = "rt"),
+           prior(constant(1), class = "shiftprop", resp = "rt"),
+           prior(normal(-3, 1), class = "Intercept", dpar = "mix", resp = "rt2"),
+           prior(normal(0,0.5), class = "sd", dpar = "mix", resp = "rt2"),
+           prior(constant(1), class = "shiftprop", resp = "rt2")
+           ),
+  adapt_delta = 0.95
   )
 
 fit_mix_multivar
 ```
 
-Testing that predictions work. Note that we don't bother with censoring for `rt2` so the predictions are wrong.
+Testing that predictions work even for multivariate models. Note that we don't bother with censoring for `rt2` so the predictions look wrong.
 
 ```{r, warning=FALSE}
 pp_check(fit_mix_multivar, resp = "rt", nsamples = 30, cores = 1)
@@ -401,10 +418,10 @@ pp_check(fit_mix_multivar, resp = "rt2", nsamples = 30, cores = 1)
 ```
 
 
-But here we'll also have to face possibly the biggest problem with `brms`: that it becomes _very_ easy to specify a model that is too complex to be well informed by the data we have or to even build a completely broken model that no amount of data will save. So enjoy with moderation :-). 
+But here we'll also have to face possibly the biggest problem with `brms`: that it becomes _very_ easy to specify a model that is too complex to be well informed by the data we have or to even build a completely broken model that no amount of data will save. The data and a few settings for the "crazy" models shown above have actually had to be tweaked for them to work well for this post. So enjoy with moderation :-). 
 
 Again, if you want the complete code, packaged in a single file you
-can just load into your project, go to https://github.com/martinmodrak/blog/content/post/RTmixture.R 
+can just load into your project, go to https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R
 
 If you encounter problems running the models that you can't resolve yourself, be
 sure to ask questions on [Stan Discourse](https://discourse.mc-stan.org) and tag

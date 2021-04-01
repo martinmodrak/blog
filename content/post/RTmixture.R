@@ -1,7 +1,12 @@
 # Implementation of contaminated response time distribution. Idea by 
-# Nathaniel Haines (https://twitter.com/Nate__Haines), code by me.
+# Nathaniel Haines (https://twitter.com/Nate__Haines), code by Martin Modrák.
 # License: BSD 2-clause (https://opensource.org/licenses/BSD-2-Clause)
-# Please acknowledge when used in academic publications
+# Please acknowledge when used in academic publications. I'll be happy to hear
+# about all your success (and struggles as well)
+# 
+# Some background, discussion and examples at 
+# http://www.martinmodrak.cz/2021/04/01/using-brms-to-model-reaction-times-contaminated-with-errors/
+
 
 # The START and END comments are used by the blog to show relevant sections of 
 # the file.
@@ -24,8 +29,10 @@ stan_funs_base <- stanvar(block = "functions", scode = "
       // Could only be created by the contamination
       return log(mix) + uniform_lpdf(y | 0, upper);
     } else if(y >= upper) {
+      // Could only come from the lognormal
       return log1m(mix) + lognormal_lpdf(y - shift | mu, sigma);
     } else {
+      // Actually mixing
       real lognormal_llh = lognormal_lpdf(y - shift | mu, sigma);
       real uniform_llh = uniform_lpdf(y | 0, upper);
       return log_mix(mix, uniform_llh, lognormal_llh);
@@ -43,8 +50,8 @@ RTmixture <- custom_family(
   type = "real",
   lb = c(NA, 0, 0, 0), # bounds for the parameters 
   ub = c(NA, NA, 1, 1),
-  vars = c("vreal1[n]", "vreal2[n]")) # Data for max_shift and upper (known)
-
+  vars = c("vreal1[n]", "vreal2[n]") # Data for max_shift and upper (known)
+)
 # END: BASE
 
 

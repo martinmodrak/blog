@@ -1,0 +1,617 @@
+---
+title: "Using brms to model reaction times contaminated with errors"
+date: 2021-04-01
+tags: ["R","Stan","reaction times"]
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Nathaniel Haines made a <a href="https://twitter.com/Nate__Haines/status/1377085208588120070">neat tweet</a> showing off his model of reaction times that handles possible contamination with both implausibly short reaction times (random key press?) or implausibly large reaction times (lapses in judgement?). Such a model often makes more sense than just throwing away a part of the data. Few people asked, if you can do that in <code>brms</code>. And while Nathaniel didn’t have a <code>brms</code> code ready, I assure you that, yes, it is possible in <code>brms</code> and I’ll show you the code.</p>
+<p>Nathaniel was kind enough to provide a bit of feedback on the post (I have no experience with reaction-time data or cogsci in general), but I should repeat that the clarity of the idea is his while all errors are mine.</p>
+<p>In this model we will take a shifted lognormal representing the actual decision process and a uniform distribution modelling the contamination. For this to make sense, we need to have some upper limit on the possible contamination times, representing the maximum times we could have observed. In most cases, the limit should be larger than the maximum time we observed, although this is not strictly mathematically necessary. We then assume that each trial has a small probability of being contaminated.</p>
+<p>Here is how generating a single data point for such a model could look in R code:</p>
+<pre><code>shift &lt;- 0.1 # Shortest reaction time possible if not contaminated
+mu &lt;- log(0.5)
+sigma &lt;- 0.6
+mix &lt;- 0.06 # Probability of contamination
+upper &lt;- 5 # Maximum time of contamination
+
+if(runif(1) &lt; mix) {
+  # Contaminated
+  y &lt;- runif(1, 0, upper)
+} else {
+  # Non-contaminated
+  y &lt;- shift + rlnorm(1, mu, sigma)
+}</code></pre>
+<p>The same could be expressed in math as:</p>
+<p><span class="math display">\[
+y_i =
+\begin{cases}
+u_i  &amp; \mathrm{if} \quad z_i = 0 \\
+s_i + r_i  &amp;  \mathrm{if} \quad z_i = 1 
+\end{cases}
+\\
+u_i \sim Uniform(0, \alpha) \\
+\log(r_i) \sim Normal(\mu_i, \sigma) \\
+P(z_i = 0) = \theta
+\]</span></p>
+<p>Where <span class="math inline">\(\theta\)</span> corresponds to <code>mix</code>, <span class="math inline">\(\alpha\)</span> to <code>upper</code> and <span class="math inline">\(s_i\)</span> to <code>shift</code>.</p>
+<p>Technically, the non-contaminated signal is allowed to take values larger than <code>upper</code>. In practice we would however usually want <code>upper</code> to be large enough that larger values do not really occur.</p>
+<p>There is one important detail in how <code>brms</code> does handle the shifted lognormal: <code>brms</code> does treat <code>shift</code> as unknown and estimates it, but does not allow the <code>shift</code> parameter to be larger than any actually observed <code>y</code>. We will therefore mimic this behaviour, but since we also have the contamination process, <code>shift</code> can in principle be larger than some <code>y</code>.
+This can potentially introduce problems for the sampler as the posterior density is not smooth when <code>shift</code> crosses some of the observed values (the lognormal component is added/removed, resulting in a sharp change).</p>
+<p>It however turns out that if <code>shift</code> crossing some <code>y</code> is rare enough, the sampling works just fine. To ensure this rarity we introduce <code>max_shift</code> as the upper bound for <code>shift</code>. In most cases, this will be the same for the whole dataset. Instead of <code>shift</code>, the model would then work with <code>shiftprop = shift / max_shift</code> - a value between 0 and 1 that is easier to work with.</p>
+<p>Of the model parameters, we take <code>max_shift</code> and <code>upper</code> as known (but possibly differ between observations) while <code>mu</code>, <code>sigma</code>, <code>mix</code> and <code>shiftprop</code> are to be estimated and can depend on predictors. However, <code>shiftprop</code> is a bit complicated here and the model will make most sense if observations that have different <code>max_shift</code> are also allowed to have different <code>shiftprop</code>. But anyway, varying <code>max_shift</code> and <code>shiftprop</code> is probably not really that useful in practice.</p>
+<p>For some use cases, one could also want to set the lower bound of the contamination distribution. To keep things simple we don’t do that here, but basically the same result can then be achieved by adding/subtracting a suitable number to the response (<code>y</code>) and bounds (<code>max_shift</code>, <code>upper</code>)</p>
+<p>Some experimental designs also involve a limit on the maximum time the response could have taken. In such contexts, it might make sense to treat the values as <a href="https://en.wikipedia.org/wiki/Censoring_(statistics)">right-censored</a>. <code>brms</code> supports censoring for most families, so we want our implementation to be compatible with it.</p>
+<p>Our goal is that at the end of the post we will be able to write models like</p>
+<pre><code>brm(bf(y | vreal(max_shift, upper) + cens(censoring) ~ 1 + condition + (1 | subject_id),
+       sigma ~ condition,
+       mix ~ (1 | subject_id),
+       family = RTmixture), ...)</code></pre>
+<p>And let <code>brms</code> handle all the rest. The final result, packaged in a single file you
+can just load into your project is at <a href="https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R" class="uri">https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R</a></p>
+<p>You may know that, <code>brms</code> has good <a href="http://paul-buerkner.github.io/brms/reference/mixture.html">support for mixtures</a>, so why not just write <code>family = mixture(uniform, shifted_lognormal)</code>? It turns out <code>brms</code> has as one of its core assumptions that every family has at least one parameter to be estimated - our uniform distribution for the contamination parameter however does not have that and thus cannot be used with <code>brms</code> directly. So instead we’ll have to implement a full blown custom family.</p>
+<p>The necessary background for implementing custom families in <code>brms</code> can be found in
+the <a href="http://paul-buerkner.github.io/brms/articles/brms_customfamilies.html">vignette on custom distributions</a>.
+Here, we will explain only the more weird stuff.</p>
+<div id="setting-up" class="section level2">
+<h2>Setting up</h2>
+<p>Let’s set up and get our hands dirty.</p>
+<pre class="r"><code>library(cmdstanr)
+library(brms)
+library(tidyverse)
+library(knitr)
+library(patchwork)
+library(bayesplot)
+
+source(&quot;RTmixture.R&quot;)
+
+ggplot2::theme_set(cowplot::theme_cowplot())
+options(mc.cores = parallel::detectCores(), brms.backend = &quot;cmdstanr&quot;)
+
+cache_dir &lt;- &quot;_RTmixture_cache&quot;
+if(!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}</code></pre>
+<p>First, we’ll generate some fake data to test the model against. Below is just a more
+concise and optimized version of the random generation scheme I showed earlier.</p>
+<pre><code>rRTmixture &lt;- function(n, meanlog, sdlog, mix, shift, upper) { 
+  ifelse(runif(n) &lt; mix,  
+         runif(n, 0, upper),  
+         shift + rlnorm(n, meanlog = meanlog, sdlog = sdlog)) 
+} 
+ </code></pre>
+<p>Then let us generate some data</p>
+<pre class="r"><code>set.seed(31546522)
+# Bounds of the data
+max_shift &lt;- 0.3
+shift &lt;- runif(1) * max_shift
+upper &lt;- 10
+mix &lt;- 0.1
+
+N &lt;- 100
+Intercept &lt;- 0.3
+beta &lt;- 0.5
+X &lt;- rnorm(N)
+mu &lt;- rep(Intercept, N) + beta * X
+sigma &lt;- 0.5
+
+rt &lt;- rRTmixture(N, meanlog = mu, sdlog = sigma, mix = mix, shift = shift, upper = upper)
+
+dd &lt;- data.frame(rt = rt, x = X, max_shift = max_shift, upper = upper)</code></pre>
+<p>Looking nice!</p>
+<pre class="r"><code>ggplot(dd, aes(x = rt)) + geom_density()</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="core-of-the-family" class="section level2">
+<h2>Core of the family</h2>
+<p>Now we need the Stan implementation of the family. That is probably the most technical part.
+Stan user’s guide has some background on <a href="https://mc-stan.org/docs/2_26/stan-users-guide/mixture-modeling-chapter.html">mixture models in Stan</a>.
+We’ll note that times before <code>shift</code> can only come from the uniform component and times
+after <code>upper</code> can only come from the lognormal component.
+For others we mix both a lognormal and the uniform via <code>log_mix</code>.</p>
+<p>With the Stan code ready, we then define the parameters of the distribution in
+a way that brms understands.</p>
+<pre><code>stan_funs_base &lt;- stanvar(block = &quot;functions&quot;, scode = &quot; 
+  real RTmixture_lpdf(real y, real mu, real sigma, real mix,  
+                      real shiftprop, real max_shift, real upper) { 
+    real shift = shiftprop * max_shift; 
+    if(y &lt;= shift) { 
+      // Could only be created by the contamination 
+      return log(mix) + uniform_lpdf(y | 0, upper); 
+    } else if(y &gt;= upper) { 
+      // Could only come from the lognormal 
+      return log1m(mix) + lognormal_lpdf(y - shift | mu, sigma); 
+    } else { 
+      // Actually mixing 
+      real lognormal_llh = lognormal_lpdf(y - shift | mu, sigma); 
+      real uniform_llh = uniform_lpdf(y | 0, upper); 
+      return log_mix(mix, uniform_llh, lognormal_llh); 
+    } 
+  } 
+ 
+&quot;) 
+ 
+ 
+ 
+RTmixture &lt;- custom_family( 
+  &quot;RTmixture&quot;,  
+  dpars = c(&quot;mu&quot;, &quot;sigma&quot;, &quot;mix&quot;, &quot;shiftprop&quot;), # Those will be estimated 
+  links = c(&quot;identity&quot;, &quot;log&quot;, &quot;logit&quot;, &quot;logit&quot;), 
+  type = &quot;real&quot;, 
+  lb = c(NA, 0, 0, 0), # bounds for the parameters  
+  ub = c(NA, NA, 1, 1), 
+  vars = c(&quot;vreal1[n]&quot;, &quot;vreal2[n]&quot;) # Data for max_shift and upper (known) 
+) </code></pre>
+<p>And we are ready to fit! We will put a weakly informative <code>beta(1,5)</code> prior on the proportion of
+contamination - this means we a prior believe that there is a 95% chance that the contamination is lower than <code>qbeta(0.95, 1, 5) = 0.4507197</code>. One could definitely be justified in tightening this prior even further toward zero for many tasks. <code>vreal</code> is just <code>brms</code>’s way of annotating arbitrary additional data for the distribution. We need to pass both
+the family and the associated <code>stanvars</code>.</p>
+<pre class="r"><code>fit_mix &lt;- brm(rt | vreal(max_shift, upper) ~ x, data = dd, family = RTmixture, 
+               stanvars = stan_funs_base, 
+               refresh = 0,
+               file = paste0(cache_dir, &quot;/mix&quot;), file_refit = &quot;on_change&quot;,
+               prior = c(prior(beta(1, 5), class = &quot;mix&quot;)))
+fit_mix</code></pre>
+<pre><code>##  Family: RTmixture 
+##   Links: mu = identity; sigma = identity; mix = identity; shiftprop = identity 
+## Formula: rt | vreal(max_shift, upper) ~ x 
+##    Data: dd (Number of observations: 100) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## Intercept     0.33      0.07     0.20     0.48 1.00     2096     2242
+## x             0.44      0.05     0.33     0.54 1.00     2368     2460
+## 
+## Family Specific Parameters: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma         0.45      0.05     0.36     0.56 1.00     2379     1976
+## mix           0.13      0.05     0.05     0.24 1.00     3158     2589
+## shiftprop     0.82      0.18     0.32     1.00 1.00     1639     1623
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>We note that we have quite good recovery of the effect of <code>x</code> (simulated as 0.5)
+and of <code>sigma</code> (which was 0.5), but 100 observations are not enough to constrain the <code>mix</code> parameter really well (simulated as 0.1).</p>
+<p>For comparison, we also fit the default shifted lognormal as implemented in <code>brms</code>.</p>
+<pre class="r"><code>fit_base &lt;- brm(rt ~ x, data = dd, family = shifted_lognormal, refresh = 0,
+                file = paste0(cache_dir, &quot;/base&quot;), file_refit = &quot;on_change&quot;)
+
+fit_base</code></pre>
+<pre><code>##  Family: shifted_lognormal 
+##   Links: mu = identity; sigma = identity; ndt = identity 
+## Formula: rt ~ x 
+##    Data: dd (Number of observations: 100) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## Intercept     0.34      0.09     0.16     0.53 1.00     1959     1949
+## x             0.47      0.07     0.33     0.61 1.00     2712     2495
+## 
+## Family Specific Parameters: 
+##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma     0.69      0.07     0.56     0.82 1.00     1883     1802
+## ndt       0.34      0.07     0.17     0.44 1.00     1633     1420
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>We see that the inferences for <code>sigma</code> are a bit biased but this is not necessarily only due to the mixture,
+another potentially biasing is the different handling of the shift.</p>
+</div>
+<div id="censoring-constant-shift" class="section level2">
+<h2>Censoring + constant shift</h2>
+<p>To support censoring in <code>brms</code> the family has to come with log CDF (cumulative distribution function) and log CCDF (complementary CDF) implementations in Stan, which we provide below.
+Those match the <code>_lpdf</code> pretty closely.</p>
+<pre><code> 
+stan_funs &lt;- stan_funs_base + stanvar(block = &quot;functions&quot;, scode = &quot; 
+  real RTmixture_lcdf(real y, real mu, real sigma, real mix,  
+                      real shiftprop, real max_shift, real upper) { 
+    real shift = shiftprop * max_shift; 
+    if(y &lt;= shift) { 
+      return log(mix) + uniform_lcdf(y | 0, upper); 
+    } else if(y &gt;= upper) { 
+      // The whole uniform part is below, so the mixture part is log(1) = 0 
+      return log_mix(mix, 0, lognormal_lcdf(y - shift | mu, sigma)); 
+    } else { 
+      real lognormal_llh = lognormal_lcdf(y - shift | mu, sigma); 
+      real uniform_llh = uniform_lcdf(y | 0, upper); 
+      return log_mix(mix, uniform_llh, lognormal_llh); 
+    } 
+  } 
+   
+  real RTmixture_lccdf(real y, real mu, real sigma, real mix,  
+                      real shiftprop, real max_shift, real upper) { 
+ 
+    real shift = shiftprop * max_shift; 
+    if(y &lt;= shift) { 
+      // The whole lognormal part is above, so the mixture part is log(1) = 0 
+      return log_mix(mix, uniform_lccdf(y | 0, upper), 0); 
+    } else if(y &gt;= upper) { 
+      return log1m(mix) + lognormal_lccdf(y - shift | mu, sigma); 
+    } else { 
+      real lognormal_llh = lognormal_lccdf(y - shift | mu, sigma); 
+      real uniform_llh = uniform_lccdf(y | 0, upper); 
+      return log_mix(mix, uniform_llh, lognormal_llh); 
+    } 
+ 
+  } 
+&quot;) 
+ </code></pre>
+<p>To test if this work, we’ll do quite aggressive censoring and treat anything larger than 1.5 as censored. In most cases it makes sense to have <code>upper</code> be the same as the censoring bound, so we’ll do that</p>
+<pre class="r"><code>set.seed(25462255)
+shift &lt;- 0.15
+cens_bound &lt;- upper &lt;- 1.5
+mix &lt;- 0.08
+
+N &lt;- 110
+Intercept &lt;- 0.5
+beta &lt;- -0.3
+X &lt;- rnorm(N)
+mu &lt;- rep(Intercept, N) + beta * X
+sigma &lt;- 0.4
+
+rt &lt;- rRTmixture(N, meanlog = mu, sdlog = sigma, 
+                 mix = mix, shift = shift, upper = upper)
+censored &lt;- rt &gt; cens_bound
+rt[censored] &lt;- cens_bound
+
+dd_cens &lt;- data.frame(rt = rt, 
+                      censored = if_else(censored, &quot;right&quot;, &quot;none&quot;),  
+                      x = X, max_shift = shift, upper = upper)</code></pre>
+<p>Finally, this model starts to be problematic if we try to estimate <code>shift</code> (well, actually <code>shiftprop</code>) as well. An easy way to to make <code>shift</code> always equal to <code>max_shift</code> is to set a constant prior on <code>shiftprop</code>, as we do below.</p>
+<pre class="r"><code>fit_mix_cens &lt;- brm(rt | vreal(max_shift, upper) + cens(censored) ~ x, 
+                    data = dd_cens, 
+                    family = RTmixture, 
+                    stanvars = stan_funs, 
+                    refresh = 0,
+                    file = paste0(cache_dir, &quot;/mix_cens&quot;), 
+                    file_refit = &quot;on_change&quot;,
+                    prior = c(prior(beta(1, 5), class = &quot;mix&quot;),
+                              prior(constant(1), class = &quot;shiftprop&quot;)))
+fit_mix_cens</code></pre>
+<pre><code>##  Family: RTmixture 
+##   Links: mu = identity; sigma = identity; mix = identity; shiftprop = identity 
+## Formula: rt | vreal(max_shift, upper) + cens(censored) ~ x 
+##    Data: dd_cens (Number of observations: 110) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Population-Level Effects: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## Intercept     0.46      0.08     0.34     0.65 1.00     2022     1674
+## x            -0.23      0.07    -0.38    -0.12 1.00     2093     1606
+## 
+## Family Specific Parameters: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma         0.36      0.07     0.26     0.53 1.00     2019     2565
+## mix           0.15      0.05     0.07     0.25 1.00     2942     2595
+## shiftprop     1.00      0.00     1.00     1.00 1.00     4000     4000
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>It works and the inferences are reasonably close to what we simulated with. A more
+thorough evaluation would require <a href="https://arxiv.org/abs/1804.06788">simulation-based calibration</a>, which would be nice, but would require a bit more energy than I have now. But it seems that at least the models are not completely wrong.</p>
+</div>
+<div id="making-predictions" class="section level2">
+<h2>Making predictions</h2>
+<p>We successfully fitted a few models, but there are some tweaks we need to do to make full use of the family.
+We might for example want to make predictions - e.g. to make posterior predictive checks - so we also need to implement prediction code. You’ll notice that we are just extracting the parameters from the prepared predictions and passing those to the generator function we defined earlier.</p>
+<pre><code> 
+posterior_predict_RTmixture &lt;- function(i, prep, ...) { 
+  if((!is.null(prep$data$lb) &amp;&amp; prep$data$lb[i] &gt; 0) ||  
+     (!is.null(prep$data$ub) &amp;&amp; prep$data$ub[i] &lt; Inf)) { 
+    stop(&quot;Predictions for truncated distributions not supported&quot;) 
+  }   
+   
+  mu &lt;- brms:::get_dpar(prep, &quot;mu&quot;, i = i) 
+  sigma &lt;- brms:::get_dpar(prep, &quot;sigma&quot;, i = i) 
+  mix &lt;- brms:::get_dpar(prep, &quot;mix&quot;, i = i) 
+  shiftprop &lt;- brms:::get_dpar(prep, &quot;shiftprop&quot;, i = i) 
+   
+  max_shift &lt;- prep$data$vreal1[i] 
+  upper &lt;- prep$data$vreal2[i] 
+  shift = shiftprop * max_shift 
+   
+  rRTmixture(prep$nsamples, meanlog = mu, sdlog = sigma,  
+             mix = mix, shift = shift, upper = upper) 
+} 
+ </code></pre>
+<p>Note that the <code>get_dpar</code> helper that simplifies some bookeeping is currently internal in <code>brms</code>, but <a href="https://github.com/paul-buerkner/brms/issues/1131">will be exposed</a> in upcoming release.</p>
+<p>With that, we can do a posterior predictive check for both models. We use only single core for predictions, because on Windows, multicore is slow and will not be able to access the custom prediction functions.</p>
+<pre class="r"><code>pp_mix &lt;- pp_check(fit_mix, type = &quot;dens_overlay&quot;, nsamples = 100,  cores = 1)  +
+  ggtitle(&quot;Mixture&quot;)
+pp_base &lt;- pp_check(fit_base, type = &quot;dens_overlay&quot;, nsamples = 100,  cores = 1) +
+  ggtitle(&quot;Shifted lognormal&quot;)
+pp_mix / pp_base</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>For this dataset, the mixture is not doing that much in improving the bulk of the predictions, but it manages to avoid the very long tail the lognormal-only model needs to accomodate the larger values.</p>
+<p>We might also look at checks of the censored model. <code>brms</code> does not directly support
+predicting censored variables (because the data passed to the model are not enough to completely determine all censoring), but we can easily do this manually:</p>
+<pre class="r"><code>set.seed(123566)
+pred_cens &lt;- posterior_predict(fit_mix_cens, cores = 1)
+pred_cens_cens &lt;- pred_cens
+# Do the censoring
+pred_cens_cens[pred_cens &gt; cens_bound] &lt;- cens_bound 
+samples_dens &lt;- sample(1:(dim(pred_cens)[1]), size = 50)
+ppc_cens1 &lt;- ppc_dens_overlay(dd_cens$rt, pred_cens_cens[samples_dens,])  + 
+  ggtitle(&quot;Censored dataset&quot;)
+ppc_cens2 &lt;- ppc_stat(1.0 * (dd_cens$censored == &quot;right&quot;), 
+                      1.0 * (pred_cens &gt;= cens_bound), 
+                      binwidth = 0.02) + 
+  ggtitle(&quot;Proportion censored&quot;)
+
+ppc_cens1 + ppc_cens2</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>The model seems to do OK.</p>
+</div>
+<div id="using-loo" class="section level2">
+<h2>Using loo</h2>
+<p>Similarly, we might want to do model comparison or stacking with <code>loo</code>, so we also implement
+the <code>log_lik</code> function.</p>
+<pre><code>## Needed for numerical stability 
+## from http://tr.im/hH5A 
+logsumexp &lt;- function (x) { 
+  y = max(x) 
+  y + log(sum(exp(x - y))) 
+} 
+ 
+ 
+RTmixture_lpdf &lt;- function(y, meanlog, sdlog, mix, shift, upper) { 
+  unif_llh = dunif(y , min = 0, max = upper, log = TRUE) 
+  lognormal_llh = dlnorm(y - shift, meanlog = meanlog, sdlog = sdlog, log = TRUE) -  
+    plnorm(upper - shift, meanlog = meanlog, sdlog = sdlog, log.p = TRUE) 
+   
+   
+  # Computing logsumexp(log(mix) + unif_llh, log1p(-mix) + lognormal_llh)     
+  # but vectorized 
+  llh_matrix &lt;- array(NA_real_, dim = c(2, max(length(unif_llh), length(lognormal_llh)))) 
+  llh_matrix[1,] &lt;- log(mix) + unif_llh 
+  llh_matrix[2,] &lt;- log1p(-mix) + lognormal_llh 
+  apply(llh_matrix, MARGIN = 2, FUN = logsumexp) 
+} 
+ 
+log_lik_RTmixture &lt;- function(i, draws) { 
+  mu &lt;- brms:::get_dpar(draws, &quot;mu&quot;, i = i) 
+  sigma &lt;- brms:::get_dpar(draws, &quot;sigma&quot;, i = i) 
+  mix &lt;- brms:::get_dpar(draws, &quot;mix&quot;, i = i) 
+  shiftprop &lt;- brms:::get_dpar(draws, &quot;shiftprop&quot;, i = i) 
+   
+  max_shift &lt;- draws$data$vreal1[i] 
+  upper &lt;- draws$data$vreal2[i] 
+  shift = shiftprop * max_shift 
+   
+  y &lt;- draws$data$Y[i] 
+  RTmixture_lpdf(y, meanlog = mu, sdlog = sigma,  
+                 mix = mix, shift = shift, upper = upper) 
+   
+} </code></pre>
+<p>And now, we can compare the models:</p>
+<pre class="r"><code>fit_mix &lt;- add_criterion(fit_mix, &quot;loo&quot;, cores = 1)
+fit_base &lt;- add_criterion(fit_base, &quot;loo&quot;, cores = 1)
+loo_compare(fit_mix, fit_base)</code></pre>
+<pre><code>##          elpd_diff se_diff
+## fit_mix   0.0       0.0   
+## fit_base -7.5       5.3</code></pre>
+<p>No surprise here - we simulated the data with the mixture model and indeed, this is preferred to a different model. Also, the shifted-lognormal model has one very influential observation, which turns out to be the smallest observed reaction time.</p>
+<pre class="r"><code>dd$rt[fit_base$criteria$loo$diagnostics$pareto_k &gt; 0.7]</code></pre>
+<pre><code>## [1] 0.4909057</code></pre>
+<pre class="r"><code>min(dd$rt)</code></pre>
+<pre><code>## [1] 0.4909057</code></pre>
+<p>This once again shows that the lognormal has problem accomodating both the high and low contamination (while it is plausible it could accomodate a small amount of just high or just low contamination quite well).</p>
+</div>
+<div id="crazy-models" class="section level2">
+<h2>Crazy models</h2>
+<p>Since <code>brms</code> is great, we can now do all sorts of stuff like put predictors on the <code>mix</code> parameter - e.g. to get a per-subject estimate of the amount of contamination.</p>
+<p>To do this, we’ll also put a weakly informative prior on the intercept for the mixture that assumes low contamination and we don’t expect huge variability in the amount of contamination (with wider priors the model starts to diverge as we would need much more data to constrain it well).</p>
+<pre class="r"><code>set.seed(35486622)
+dd_subj &lt;- dd_cens
+dd_subj$subject_id &lt;- sample(1:12, size = nrow(dd_cens), replace = TRUE)
+
+fit_mix_all &lt;- brm(
+  bf(rt | vreal(max_shift, upper) + cens(censored) ~ x, 
+     mix ~ 1 + (1 | subject_id),
+     family = RTmixture),
+  data = dd_subj,
+  stanvars = stan_funs, 
+               refresh = 0,
+               file = paste0(cache_dir, &quot;/mix_all&quot;), file_refit = &quot;on_change&quot;,
+               prior = c(prior(normal(-3, 1), class = &quot;Intercept&quot;, dpar = &quot;mix&quot;),
+                         prior(normal(0,0.5), class = &quot;sd&quot;, dpar = &quot;mix&quot;),
+                         prior(constant(1), class = &quot;shiftprop&quot;)))
+
+fit_mix_all</code></pre>
+<pre><code>##  Family: RTmixture 
+##   Links: mu = identity; sigma = identity; mix = logit; shiftprop = identity 
+## Formula: rt | vreal(max_shift, upper) + cens(censored) ~ x 
+##          mix ~ 1 + (1 | subject_id)
+##    Data: dd_subj (Number of observations: 110) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Group-Level Effects: 
+## ~subject_id (Number of levels: 12) 
+##                   Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sd(mix_Intercept)     0.38      0.29     0.02     1.07 1.00     2706     2137
+## 
+## Population-Level Effects: 
+##               Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## Intercept         0.45      0.07     0.33     0.62 1.00     3586     2305
+## mix_Intercept    -2.05      0.44    -2.96    -1.25 1.00     4206     2807
+## x                -0.22      0.06    -0.37    -0.11 1.00     3714     2666
+## 
+## Family Specific Parameters: 
+##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma         0.37      0.07     0.26     0.54 1.00     3535     3025
+## shiftprop     1.00      0.00     1.00     1.00 1.00     4000     4000
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>Checking that posterior predictions work:</p>
+<pre class="r"><code>set.seed(1233354)
+pred_cens &lt;- posterior_predict(fit_mix_all, cores = 1)
+pred_cens_cens &lt;- pred_cens
+pred_cens_cens[pred_cens &gt; cens_bound] &lt;- cens_bound 
+samples_dens &lt;- sample(1:(dim(pred_cens)[1]), size = 50)
+ppc_dens_overlay(dd_cens$rt, pred_cens_cens[samples_dens,])</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>We can also do multivariate models where some of the predictors are correlated across answers:</p>
+<pre class="r"><code>set.seed(0245562)
+# Build a dataset containing two separate predictions
+dd_both &lt;- dd
+dd_both$rt2 &lt;- dd_cens$rt[1:nrow(dd_both)]
+dd_both$x2 &lt;- dd_cens$x[1:nrow(dd_both)]
+dd_both$censored2 &lt;- dd_cens$censored[1:nrow(dd_both)]
+dd_both$max_shift2 &lt;- dd_cens$max_shift[1:nrow(dd_both)]
+dd_both$upper2 &lt;- dd_cens$upper[1:nrow(dd_both)]
+dd_both$subject_id &lt;- sample(1:12, size = nrow(dd_both), replace = TRUE)
+
+fit_mix_multivar &lt;- brm(
+  bf(rt | vreal(max_shift, upper)  ~ x, 
+     mix ~ 1 + (1 | p | subject_id),
+     family = RTmixture) +
+  bf(rt2 | vreal(max_shift2, upper2) + cens(censored2) ~ x2, 
+   mix ~ 1 + (1 | p | subject_id),
+     family = RTmixture),
+  data = dd_both,
+  stanvars = stan_funs, 
+  refresh = 0,
+  file = paste0(cache_dir, &quot;/mix_multivar&quot;), file_refit = &quot;on_change&quot;,
+  prior = c(prior(normal(-3, 1), class = &quot;Intercept&quot;, dpar = &quot;mix&quot;, resp = &quot;rt&quot;),
+           prior(normal(0,0.5), class = &quot;sd&quot;, dpar = &quot;mix&quot;, resp = &quot;rt&quot;),
+           prior(constant(1), class = &quot;shiftprop&quot;, resp = &quot;rt&quot;),
+           prior(normal(-3, 1), class = &quot;Intercept&quot;, dpar = &quot;mix&quot;, resp = &quot;rt2&quot;),
+           prior(normal(0,0.5), class = &quot;sd&quot;, dpar = &quot;mix&quot;, resp = &quot;rt2&quot;),
+           prior(constant(1), class = &quot;shiftprop&quot;, resp = &quot;rt2&quot;)
+           ),
+  adapt_delta = 0.95
+  )</code></pre>
+<pre><code>## Setting &#39;rescor&#39; to FALSE by default for this model</code></pre>
+<pre class="r"><code>fit_mix_multivar</code></pre>
+<pre><code>##  Family: MV(RTmixture, RTmixture) 
+##   Links: mu = identity; sigma = identity; mix = logit; shiftprop = identity
+##          mu = identity; sigma = identity; mix = logit; shiftprop = identity 
+## Formula: rt | vreal(max_shift, upper) ~ x 
+##          mix ~ 1 + (1 | p | subject_id)
+##          rt2 | vreal(max_shift2, upper2) + cens(censored2) ~ x2 
+##          mix ~ 1 + (1 | p | subject_id)
+##    Data: dd_both (Number of observations: 100) 
+## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup samples = 4000
+## 
+## Group-Level Effects: 
+## ~subject_id (Number of levels: 12) 
+##                                         Estimate Est.Error l-95% CI u-95% CI
+## sd(mix_rt_Intercept)                        0.33      0.25     0.01     0.91
+## sd(mix_rt2_Intercept)                       0.37      0.27     0.02     1.01
+## cor(mix_rt_Intercept,mix_rt2_Intercept)     0.00      0.58    -0.95     0.95
+##                                         Rhat Bulk_ESS Tail_ESS
+## sd(mix_rt_Intercept)                    1.00     2712     1787
+## sd(mix_rt2_Intercept)                   1.00     2587     2046
+## cor(mix_rt_Intercept,mix_rt2_Intercept) 1.00     4330     2836
+## 
+## Population-Level Effects: 
+##                   Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## rt_Intercept          0.30      0.06     0.18     0.43 1.00     4739     3085
+## mix_rt_Intercept     -2.28      0.54    -3.50    -1.35 1.00     4033     1843
+## rt2_Intercept         0.43      0.08     0.31     0.60 1.00     3258     1826
+## mix_rt2_Intercept    -1.91      0.44    -2.80    -1.11 1.00     4455     3016
+## rt_x                  0.46      0.05     0.36     0.56 1.00     5438     2978
+## rt2_x2               -0.25      0.07    -0.40    -0.13 1.00     3314     2106
+## 
+## Family Specific Parameters: 
+##               Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma_rt          0.49      0.05     0.40     0.60 1.00     4904     3014
+## sigma_rt2         0.36      0.07     0.25     0.53 1.00     3451     2885
+## shiftprop_rt      1.00      0.00     1.00     1.00 1.00     4000     4000
+## shiftprop_rt2     1.00      0.00     1.00     1.00 1.00     4000     4000
+## 
+## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+<p>Testing that predictions work even for multivariate models. Note that we don’t bother with censoring for <code>rt2</code> so the predictions look wrong.</p>
+<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt&quot;, nsamples = 30, cores = 1)</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt2&quot;, nsamples = 30, cores = 1)</code></pre>
+<p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-19-2.png" width="672" /></p>
+<p>But here we’ll also have to face possibly the biggest problem with <code>brms</code>: that it becomes <em>very</em> easy to specify a model that is too complex to be well informed by the data we have or to even build a completely broken model that no amount of data will save. The data and a few settings for the “crazy” models shown above have actually had to be tweaked for them to work well for this post. So enjoy with moderation :-).</p>
+<p>Again, if you want the complete code, packaged in a single file you
+can just load into your project, go to <a href="https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R" class="uri">https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R</a></p>
+<p>If you encounter problems running the models that you can’t resolve yourself, be
+sure to ask questions on <a href="https://discourse.mc-stan.org">Stan Discourse</a> and tag
+me (<span class="citation">@martinmodrak</span>) in the question!</p>
+</div>
+<div id="original-computing-environment" class="section level2">
+<h2>Original computing environment</h2>
+<pre class="r"><code>sessionInfo()</code></pre>
+<pre><code>## R version 4.0.3 (2020-10-10)
+## Platform: x86_64-w64-mingw32/x64 (64-bit)
+## Running under: Windows 10 x64 (build 18363)
+## 
+## Matrix products: default
+## 
+## locale:
+## [1] LC_COLLATE=Czech_Czechia.1250  LC_CTYPE=Czech_Czechia.1250   
+## [3] LC_MONETARY=Czech_Czechia.1250 LC_NUMERIC=C                  
+## [5] LC_TIME=Czech_Czechia.1250    
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## other attached packages:
+##  [1] bayesplot_1.8.0 patchwork_1.1.1 knitr_1.31      forcats_0.5.1  
+##  [5] stringr_1.4.0   dplyr_1.0.4     purrr_0.3.4     readr_1.4.0    
+##  [9] tidyr_1.1.2     tibble_3.0.6    ggplot2_3.3.3   tidyverse_1.3.0
+## [13] brms_2.15.0     Rcpp_1.0.6      cmdstanr_0.3.0 
+## 
+## loaded via a namespace (and not attached):
+##   [1] readxl_1.3.1         backports_1.2.1      plyr_1.8.6          
+##   [4] igraph_1.2.6         splines_4.0.3        crosstalk_1.1.1     
+##   [7] TH.data_1.0-10       rstantools_2.1.1     inline_0.3.17       
+##  [10] digest_0.6.27        htmltools_0.5.1.1    rsconnect_0.8.16    
+##  [13] fansi_0.4.2          magrittr_2.0.1       modelr_0.1.8        
+##  [16] RcppParallel_5.0.3   matrixStats_0.58.0   xts_0.12.1          
+##  [19] sandwich_3.0-0       prettyunits_1.1.1    colorspace_2.0-0    
+##  [22] rvest_0.3.6          haven_2.3.1          xfun_0.22           
+##  [25] callr_3.5.1          crayon_1.4.1         jsonlite_1.7.2      
+##  [28] lme4_1.1-26          survival_3.2-7       zoo_1.8-8           
+##  [31] glue_1.4.2           gtable_0.3.0         emmeans_1.5.4       
+##  [34] V8_3.4.0             pkgbuild_1.2.0       rstan_2.26.1        
+##  [37] abind_1.4-5          scales_1.1.1         mvtnorm_1.1-1       
+##  [40] DBI_1.1.1            miniUI_0.1.1.1       xtable_1.8-4        
+##  [43] stats4_4.0.3         StanHeaders_2.26.1   DT_0.17             
+##  [46] htmlwidgets_1.5.3    httr_1.4.2           threejs_0.3.3       
+##  [49] ellipsis_0.3.1       farver_2.0.3         pkgconfig_2.0.3     
+##  [52] loo_2.4.1            sass_0.3.1           dbplyr_2.1.0        
+##  [55] utf8_1.1.4           labeling_0.4.2       tidyselect_1.1.0    
+##  [58] rlang_0.4.10         reshape2_1.4.4       later_1.1.0.1       
+##  [61] munsell_0.5.0        cellranger_1.1.0     tools_4.0.3         
+##  [64] cli_2.3.1            generics_0.1.0       broom_0.7.5         
+##  [67] ggridges_0.5.3       evaluate_0.14        fastmap_1.1.0       
+##  [70] yaml_2.2.1           processx_3.4.5       fs_1.5.0            
+##  [73] nlme_3.1-149         mime_0.10            projpred_2.0.2      
+##  [76] xml2_1.3.2           rstudioapi_0.13      compiler_4.0.3      
+##  [79] shinythemes_1.2.0    curl_4.3             gamm4_0.2-6         
+##  [82] reprex_1.0.0         statmod_1.4.35       bslib_0.2.4         
+##  [85] stringi_1.5.3        highr_0.8            ps_1.5.0            
+##  [88] blogdown_1.2.3       Brobdingnag_1.2-6    lattice_0.20-41     
+##  [91] Matrix_1.2-18        nloptr_1.2.2.2       markdown_1.1        
+##  [94] shinyjs_2.0.0        vctrs_0.3.6          pillar_1.5.0        
+##  [97] lifecycle_1.0.0      jquerylib_0.1.3      bridgesampling_1.0-0
+## [100] estimability_1.3     cowplot_1.1.1        httpuv_1.5.5        
+## [103] R6_2.5.0             bookdown_0.21        promises_1.2.0.1    
+## [106] gridExtra_2.3        codetools_0.2-16     boot_1.3-25         
+## [109] colourpicker_1.1.0   MASS_7.3-53          gtools_3.8.2        
+## [112] assertthat_0.2.1     withr_2.4.1          shinystan_2.5.0     
+## [115] multcomp_1.4-16      mgcv_1.8-33          parallel_4.0.3      
+## [118] hms_1.0.0            grid_4.0.3           coda_0.19-4         
+## [121] minqa_1.2.4          rmarkdown_2.7        shiny_1.6.0         
+## [124] lubridate_1.7.9.2    base64enc_0.1-3      dygraphs_1.1.1.6</code></pre>
+</div>
