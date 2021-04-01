@@ -71,7 +71,7 @@ brm(bf(y | vreal(max_shift, upper) + cens(censoring) ~ 1 + condition + (1 | subj
 ```
 
 And let `brms` handle all the rest. The final result, packaged in a single file you
-can just load into your project is at https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R
+can just load into your project is at https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R However, be advised that the code was only quite shallowly tested, so look both ways before crossing and test if you can recover parameters from simulated data before trusting me too much.
 
 You may know that, `brms` has good [support for mixtures](http://paul-buerkner.github.io/brms/reference/mixture.html), so why not just write `family = mixture(uniform, shifted_lognormal)`? It turns out `brms` has as one of its core assumptions that every family has at least one parameter to be estimated - our uniform distribution for the contamination parameter however does not have that and thus cannot be used with `brms` directly. So instead we'll have to implement a full blown custom family. 
 

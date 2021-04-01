@@ -51,7 +51,7 @@ This can potentially introduce problems for the sampler as the posterior density
        mix ~ (1 | subject_id),
        family = RTmixture), ...)</code></pre>
 <p>And let <code>brms</code> handle all the rest. The final result, packaged in a single file you
-can just load into your project is at <a href="https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R" class="uri">https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R</a></p>
+can just load into your project is at <a href="https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R" class="uri">https://github.com/martinmodrak/blog/blob/master/content/post/RTmixture.R</a> However, be advised that the code was only quite shallowly tested, so look both ways before crossing and test if you can recover parameters from simulated data before trusting me too much.</p>
 <p>You may know that, <code>brms</code> has good <a href="http://paul-buerkner.github.io/brms/reference/mixture.html">support for mixtures</a>, so why not just write <code>family = mixture(uniform, shifted_lognormal)</code>? It turns out <code>brms</code> has as one of its core assumptions that every family has at least one parameter to be estimated - our uniform distribution for the contamination parameter however does not have that and thus cannot be used with <code>brms</code> directly. So instead we’ll have to implement a full blown custom family.</p>
 <p>The necessary background for implementing custom families in <code>brms</code> can be found in
 the <a href="http://paul-buerkner.github.io/brms/articles/brms_customfamilies.html">vignette on custom distributions</a>.
