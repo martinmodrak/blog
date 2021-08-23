@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Excercise 3</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Martin Modrák" />
+    <script src="libs/header-attrs/header-attrs.js"></script>
+    <link href="libs/remark-css/hygge.css" rel="stylesheet" />
+    <link href="libs/remark-css/middlebury-fonts.css" rel="stylesheet" />
+    <link href="libs/remark-css/ninjutsu.css" rel="stylesheet" />
+    <link rel="stylesheet" href="C:/Users/Martin/Documents/tutorial-sbc-stanconnect2021/tutorial-sbc.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Excercise 3
+### Martin Modrák
+### 2021/08/24 (updated: 2021-08-23)
+
+---
+
+
+
+
+# A detective story
+
+We have a trustworthy generator of data for linear regression 
+and 3 suspicious implementations in Stan. Can you tell which is telling the truth?
+Maybe all are wrong? Maybe all are correct?
+
+---
+
+class:small-code
+
+# Generator
+
+It is often useful to implement the generator code in the most simple and stupid
+way to reduce the probability of errors. Keep all the fancy optimizations for your
+Stan code!
+
+We promise the code below is correct. `N` is the number of data points, `K` the number of predictors.
+
+```r
+single_dataset_regression &lt;- function(N, K) {
+  x &lt;- matrix(rnorm(n = N * K, mean = 0, sd = 1), 
+              nrow = N, ncol = K)
+  alpha &lt;- rnorm(n = 1, mean = 0, sd = 1)
+  beta &lt;- rnorm(n = K, mean = 0, sd = 1)
+  sigma &lt;- abs(rnorm(n = 1, mean = 0, sd = 2))
+  
+  y &lt;- array(NA_real_, N)
+  for(n in 1:N) {
+    mu &lt;- alpha
+    for(k in 1:K) {
+      mu &lt;- mu + x[n,k] * beta[k]
+    }
+    y[n] &lt;- rnorm(n = 1, mean = mu, sd = sigma) 
+  }
+  
+  list(
+    parameters = list(
+      alpha = alpha,
+      beta = beta,
+      sigma = sigma),
+    generated = list(
+      N = N, K = K,
+      x = x, y = y
+    )
+  )
+  
+}
+```
+
+---
+
+# Task 1
+
+Build the generator and generate datasets.
+Once again, 10 datasets should serve us well.
+
+```r
+generator_regression &lt;- SBC_generator_function(
+               single_dataset_regression, N = 100, K = 2)
+datasets_regression &lt;- generate_datasets(
+               generator_regression, 10)
+```
+
+---
+
+class: small-code
+
+# Suspect 1
+
+Store as `regression_1.stan`.
+
+```stan
+data {
+  int&lt;lower=0&gt; N;   // number of data items
+  int&lt;lower=0&gt; K;   // number of predictors
+  matrix[N, K] x;   // predictor matrix
+  vector[N] y;      // outcome vector
+}
+parameters {
+  real alpha;           // intercept
+  vector[K] beta;       // coefficients for predictors
+  real&lt;lower=0&gt; sigma;  // error scale
+}
+model {
+  vector[N] mu = rep_vector(alpha, N);
+  for(i in 1:K) {
+    for(j in 1:N) {
+      mu[j] += beta[i] * x[j, i];
+    }
+  }
+  y ~ normal(mu, sigma);  // likelihood
+  alpha ~ normal(0, 5);
+  beta ~ normal(0, 1);
+  sigma ~ normal(0, 2);
+}
+```
+
+---
+
+class: small-code
+
+# Suspect 2
+
+Store as `regression_2.stan`.
+
+```stan
+data {
+  int&lt;lower=0&gt; N;   // number of data items
+  int&lt;lower=0&gt; K;   // number of predictors
+  matrix[N, K] x;   // predictor matrix
+  vector[N] y;      // outcome vector
+}
+parameters {
+  real alpha;           // intercept
+  vector[K] beta;       // coefficients for predictors
+  real&lt;lower=0&gt; sigma;  // error scale
+}
+model {
+  vector[N] mu;
+  for(i in 1:N) {
+    mu[i] = alpha;
+    for(j in 1:K) {
+      mu[i] += beta[j] * x[j, j];
+    }
+  }
+  y ~ normal(mu, sigma);  // likelihood
+  alpha ~ normal(0, 5);
+  beta ~ normal(0, 1);
+  sigma ~ normal(0, 2);
+}
+```
+
+---
+
+class: small-code
+
+# Suspect 3
+
+Store as `regression_3.stan`.
+
+```stan
+data {
+  int&lt;lower=0&gt; N;   // number of data items
+  int&lt;lower=0&gt; K;   // number of predictors
+  matrix[N, K] x;   // predictor matrix
+  vector[N] y;      // outcome vector
+}
+parameters {
+  real alpha;           // intercept
+  vector[K] beta;       // coefficients for predictors
+  real&lt;lower=0&gt; sigma;  // error scale
+}
+model {
+  y ~ normal(transpose(beta) * transpose(x) + alpha, sigma);  // likelihood
+  alpha ~ normal(0, 5);
+  beta ~ normal(0, 1);
+  sigma ~ normal(0, 2);
+}
+```
+
+---
+
+# Question 1
+
+Make a guess - which of the suspects you believe implement linear regression correctly? (could be all three)
+Which of the suspects will not give correct results? (could be all three).
+
+Don't spend too much time investigating, if you don't see it - SBC is going to 
+help us!
+
+---
+
+class: small-code
+
+# Task 2 - Run SBC
+
+Backend with `cmdstanr`
+```r
+  model_regression_1 &lt;- cmdstan_model("regression_1.stan")
+  backend_regression_1 &lt;- SBC_backend_cmdstan_sample(
+      model_regression_1, 
+      iter_warmup = 400, iter_sampling = 500)
+
+```
+
+Backend with `rstan`
+
+```r
+  model_regression_1 &lt;- stan_model("regression_1.stan")
+  backend_regression_1 &lt;- SBC_backend_rstan_sample(
+      model_regression_1, 
+       iter = 900, warmup = 400)
+```
+
+SBC + plots
+
+```r
+results_regression_1 &lt;- 
+  compute_results(datasets_regression, backend_regression_1)
+plot_rank_hist(results_regression_1)
+plot_ecdf(results_regression_1)
+plot_ecdf_diff(results_regression_1)
+
+```
+
+(Repeat for all 3 suspects)
+
+---
+
+# Question 2/2
+
+Which of the suspects were caught misleading us using SBC? 
+Which parameters are affected the most and in which direction?
+
+
+---
+
+# Bonus Task 1
+
+Figure out what went wrong in the problematic model(s). Can you fix the problem(s)?
+
+There is a hint on the next slide.
+
+---
+
+# Bonus Task 1 - Hint
+
+Indexing and for loops are a frequent source of typos. Some letters just look quite similar.
+
+---
+
+# Bonus Task 2
+
+Can you explain why the problematic model(s) produced the SBC plots they did?
+
+# Bonus Task 3
+
+Look at `results_regression_X$stats` for the problematic models. Would it be possible to use `z_score` to diagnose the problem faster? 
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
