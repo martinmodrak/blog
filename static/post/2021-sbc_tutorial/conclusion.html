@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="" xml:lang="">
   <head>
-    <title>SBC Intro</title>
+    <title>SBC Tutorial - Concliding remarks</title>
     <meta charset="utf-8" />
     <meta name="author" content="Martin Modrák" />
     <script src="libs/header-attrs/header-attrs.js"></script>
@@ -13,7 +13,7 @@
     <textarea id="source">
 class: center, middle, inverse, title-slide
 
-# SBC Intro
+# SBC Tutorial - Concliding remarks
 ### Martin Modrák
 ### 2021/08/24 (updated: 2021-08-24)
 
@@ -22,244 +22,41 @@ class: center, middle, inverse, title-slide
 
 
 
-# SBC Context
+---
 
---
+# Side effects of SBC
 
-- SBC is a tool to check you implemented your model correctly.
+- Prior predictive checks
 
---
-
-- It just one of tools to validate your model in a Bayesian workflow
-
---
-
-- SBC can be run even before you collect data
-
---
-
-- The goal of this tutorial is to show you that with the `SBC` package,
-there is little cost to including (some form of) SBC in your everyday modelling workflow.
-
---
-
-- In this tutorial, we'll let you use SBC to find and diagnose a bug.
+- Posterior/prior shrinkage
 
 ---
 
-# Two types of problems with Stan model
+# Limits of SBC
 
-1. Bug in model 
-
---
-
-2. Data - model mismatch 
+The consistency criteria we check is that "prior matches the posterior averaged over data".
 
 --
 
-We will focus on 1.
+If the prior matches the posterior always (e.g. we ignore data)...
+
+--
+
+... SBC will pass.
+
+--
+
+Some ways around this - can be found in the `limits_of_SBC.Rmd` vignette in the SBC package.
 
 ---
 
-# Simulation to the rescue!
+# Main takeaways
+
+- Once you have code to create simulated data, adding SBC is not hard.
 
 --
 
-How to seperate bugs from model-data mismatch?
-
---
-
-- If we simulate data _exactly_ as the model assumes, any problem has to be a bug.
-
----
-
-class: split-two
-
-
-.column[.content[
-
-## Stan
-
-```stan
-data {
-   int&lt;lower=0&gt; N;
-   vector&lt;lower=0&gt;[N] y;
-   vector[N] x;
-}
-
-parameters {
-   real a;
-   real b;
-   real&lt;lower=0&gt; sigma;
-}
-
-model {
-   vector[N] mu = a + b * x;
-   a ~ normal(5, 3);
-   b ~ normal(0, 1);
-   sigma ~ normal(0, 2);
-   y ~ lognormal(mu, sigma);
-}
-```
-]]
-.column.bg-gray[.content[
-  
-## R  
-
-```r
-# N and x is not modelled, 
-# choose to match your actual data
-N &lt;- 10
-x &lt;- rnorm(n = N, mean = 0, sd = 2)
-
-
-
-a &lt;- rnorm(n = 1, mean = 5, sd = 3)
-b &lt;- rnorm(n = 1, mean = 0, sd = 1)
-sigma &lt;- abs(
-  rnorm(n = 1, mean = 0, sd = 2))
-
-
-mu &lt;- a + b * x
-
-
-
-y &lt;- rlnorm(n = N, 
-       meanlog = mu, sdlog = sigma)
-       
-```  
-  
-]]
-
----
-
-# How to spot failure?
-
-```
-  variable      mean    sd        q5      q95
-   alpha        0.372 0.224   0.00794   0.737 
-```
-
-Is this OK, if we simulated
-
-- `alpha = 0.3`
-
---
-
--  `alpha = 0.007`
-
---
-
--  `alpha = -30`
-
---
-
-Diagnostics (divergences, Rhat, ESS)
-
-# How to spot succes?!
-
-
----
-
-# Consistency requirement
-
-"In 95% of simulations, the true parameter lies within the central 95% posterior credible interval."
-
---
-
-"In x% of simulations, the true parameter lies within the x% posterior credible interval (of any kind)"
-
---
-
-## SBC for single parameter:
-
---
-
-1. Thin posterior to get `\(S\)` independent samples.
-
---
-
-2. For each simulation take the rank of the true value within the samples
-  - Rank: no. of samples &lt; true value
-
---
-
-3. Across simulations, this rank should be uniformly distributed between `\(0\)` and `\(S\)`
-
----
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - Ranks 
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-1-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-1-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-1-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-2-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-2-2.png)&lt;!-- --&gt;
-
-]]
-
-
----
-
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - ECDF 
-
-a.k.a. "black line outside blue region is a problem"
-
-
-]]
-
-.row[.content[
-
-
-![](sbc_intro_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-3-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-3-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-4-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-4-2.png)&lt;!-- --&gt;
-
-]]
-
-
----
-
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - ECDF diff
-
-a.k.a. "black line outside blue region is a problem, rotated for readability"
-
-]]
-
-.row[.content[
-
-
-![](sbc_intro_files/figure-html/unnamed-chunk-5-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-5-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-5-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-6-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-6-2.png)&lt;!-- --&gt;
-
-]]
-
+- SBC is just one way of checking your model and it is not perfect
     </textarea>
 <style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
 <script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
