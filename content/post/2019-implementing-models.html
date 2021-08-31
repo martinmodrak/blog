@@ -1,0 +1,18 @@
+---
+title: "Implementing Stan Models"
+date: 2019-04-24
+tags: ["R","Stan","Modelling"]
+draft: true
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Subrouting to Betancourt’s workflow.</p>
+<pre class="r"><code>library(rstan)
+library(knitr)
+library(tidyverse)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+set.seed(24683068)</code></pre>
+<p>Simulation code: write in R and unoptimized. Example to catch problem: adding sigmas instead of variances (and in R simulate two normals)</p>

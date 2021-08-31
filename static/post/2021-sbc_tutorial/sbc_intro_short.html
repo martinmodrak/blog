@@ -29,43 +29,12 @@ This work was supported by ELIXIR CZ research infrastructure project (MEYS Grant
 ---
 
 
-# Model workflow
 
-- Prior predictive checks 
-
---
-
-- Validate computation 
+# Context
 
 --
 
-- Evaluate model fit to real data 
-  - Posterior predictive checks 
-  
---
-
-- Use the model
-
----
-
-# Model workflow
-
-- Prior predictive checks
-
-- Validate computation **⬅ SBC lives here**
-
-- Evaluate model fit to real data
-  - Posterior predictive checks 
-  
-- Use the model
-
----
-
-# SBC Context
-
---
-
-- SBC is a tool to check you implemented your model correctly.
+- SBC can be a useful tool to check you implemented your model correctly.
 
 --
 
@@ -84,6 +53,10 @@ there is little cost to including (some form of) SBC in your everyday modelling 
 
 - In this tutorial, we'll let you use SBC to find and diagnose a bug.
 
+--
+
+- We will show toy problems, but have applied it to non-toy problems as well.
+
 ---
 
 # Two types of problems with Stan model
@@ -100,204 +73,31 @@ We will focus on 1.
 
 ---
 
-# Simulation to the rescue!
+# Result of SBC (1)
+
+### SBC fails: There is a mismatch between our model, algorithm and simulator.
+
+![](sbc_intro_short_files/figure-html/unnamed-chunk-2-1.png)&lt;!-- --&gt;
+
 
 --
 
-How to seperate bugs from model-data mismatch?
-
---
-
-- If we simulate data _exactly_ as the model assumes, any problem has to be a bug.
+&amp;nbsp;&amp;nbsp;&amp;nbsp;&amp;nbsp; The mismatch can be anywhere!
 
 ---
 
-class: split-two
+# Result of SBC (2)
 
 
-.column[.content[
+### SBC passes: To the precision availabe with the given number of simulations, our model, algorithm and simulator are consistent.
 
-## Stan
+![](sbc_intro_short_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;
 
-```stan
-data {
-   int&lt;lower=0&gt; N;
-   vector&lt;lower=0&gt;[N] y;
-   vector[N] x;
-}
-
-parameters {
-   real a;
-   real b;
-   real&lt;lower=0&gt; sigma;
-}
-
-model {
-   vector[N] mu = a + b * x;
-   a ~ normal(5, 3);
-   b ~ normal(0, 1);
-   sigma ~ normal(0, 2);
-   y ~ lognormal(mu, sigma);
-}
-```
-]]
-.column.bg-gray[.content[
-  
-## R  
-
-```r
-# N and x is not modelled, 
-# choose to match your actual data
-N &lt;- 10
-x &lt;- rnorm(n = N, mean = 0, sd = 2)
-
-
-
-a &lt;- rnorm(n = 1, mean = 5, sd = 3)
-b &lt;- rnorm(n = 1, mean = 0, sd = 1)
-sigma &lt;- abs(
-  rnorm(n = 1, mean = 0, sd = 2))
-
-
-mu &lt;- a + b * x
-
-
-
-y &lt;- rlnorm(n = N, 
-       meanlog = mu, sdlog = sigma)
-       
-```  
-  
-]]
-
----
-
-# How to spot failure?
-
-```
-  variable      mean    sd        q5      q95
-   alpha        0.372 0.224   0.00794   0.737 
-```
-
-Is this OK, if we simulated
-
-- `alpha = 0.3`
 
 --
 
--  `alpha = 0.007`
+&amp;nbsp;&amp;nbsp;&amp;nbsp;&amp;nbsp;For a specific sense of consistent. Nothing more, nothing less.
 
---
-
--  `alpha = -30`
-
---
-
-Diagnostics (divergences, Rhat, ESS)
-
-# How to spot success?!
-
-
----
-
-# Consistency requirement
-
-"In 95% of simulations, the true parameter lies within the central 95% posterior credible interval."
-
---
-
-"In x% of simulations, the true parameter lies within the x% posterior credible interval (of any kind)"
-
---
-
-## SBC for single parameter:
-
---
-
-1. Thin posterior to get `\(S\)` independent samples.
-
---
-
-2. For each simulation take the rank of the true value within the samples
-  - Rank: no. of samples &lt; true value
-
---
-
-3. Across simulations, this rank should be uniformly distributed between `\(0\)` and `\(S\)`
-
----
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - Ranks 
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-2-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-2-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-2-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-3-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-3-2.png)&lt;!-- --&gt;
-
-]]
-
-
----
-
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - ECDF 
-
-a.k.a. "black line outside blue region is a problem"
-
-
-]]
-
-.row[.content[
-
-
-![](sbc_intro_files/figure-html/unnamed-chunk-4-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-4-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-4-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-5-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-5-2.png)&lt;!-- --&gt;
-
-]]
-
-
----
-
-class: split-three
-
-.row[.content[
-
-# SBC visualisations - ECDF diff
-
-a.k.a. "black line outside blue region is a problem, rotated for readability"
-
-]]
-
-.row[.content[
-
-
-![](sbc_intro_files/figure-html/unnamed-chunk-6-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-6-2.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-6-3.png)&lt;!-- --&gt;
-
-]]
-
-.row[.content[
-
-![](sbc_intro_files/figure-html/unnamed-chunk-7-1.png)&lt;!-- --&gt;![](sbc_intro_files/figure-html/unnamed-chunk-7-2.png)&lt;!-- --&gt;
-
-]]
 
     </textarea>
 <style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>

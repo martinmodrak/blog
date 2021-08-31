@@ -23,7 +23,7 @@ functions {
     return to_vector({value});
   }
 
-  real neg_binomial_sum_saddlepoint_lpmf(int[] sum_y, vector mus, vector phis, real[] dummy_x_r) {
+  real neg_binomial_sum_saddlepoint_lpmf(int[] sum_y, vector mus, vector phis, data real[] dummy_x_r) {
     int N = size(sum_y);
 
     int G = rows(mus);

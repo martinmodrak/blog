@@ -33,9 +33,9 @@ model {
   vector[G + 1] all_phis = append_row(phis, to_vector({extra_phi}));
 
   if(method == 0) {
-    sums ~ neg_binomial_sum_saddlepoint_lpmf(all_mus, all_phis, dummy_x_r);
+    sums ~ neg_binomial_sum_saddlepoint(all_mus, all_phis, dummy_x_r);
   } else {
-    sums ~ neg_binomial_sum_moments_lpmf(all_mus, all_phis);
+    sums ~ neg_binomial_sum_moments(all_mus, all_phis);
   }
 
   log_extra_mu_raw ~ normal(0, 1);

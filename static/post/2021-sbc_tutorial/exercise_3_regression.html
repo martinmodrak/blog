@@ -16,7 +16,7 @@ class: center, middle, inverse, title-slide
 
 # Excercise 3
 ### Martin Modrák
-### 2021/08/24 (updated: 2021-08-24)
+### 2021/08/24 (updated: 2021-08-31)
 
 ---
 
@@ -74,7 +74,7 @@ single_dataset_regression &lt;- function(N, K) {
 
 ---
 
-# Task 1
+# Task 1/2
 
 Build the generator and generate datasets.
 Once again, 10 datasets should serve us well.
@@ -92,7 +92,7 @@ class: small-code
 
 # Suspect 1
 
-Store in a file called `regression_1.stan`.
+Already saved in `regression_1.stan` if you ran the setup script, otherwise store it in this file yourself :-)
 
 ```stan
 data {
@@ -185,7 +185,7 @@ model {
 
 ---
 
-# Question 1
+# Question 1/2
 
 Make a guess - which of the suspects you believe implement linear regression correctly? (could be all three)
 Which of the suspects will not give correct results? (could be all three).
@@ -197,7 +197,7 @@ help us!
 
 class: small-code
 
-# Task 2 - Run SBC
+# Task 2/2 - Run SBC
 
 Backend with `cmdstanr`
 ```r

@@ -15,7 +15,7 @@ class: center, middle, inverse, title-slide
 
 # Excercise 2
 ### Martin Modrák
-### 2021/08/24 (updated: 2021-08-24)
+### 2021/08/24 (updated: 2021-08-31)
 
 ---
 
@@ -34,11 +34,12 @@ install.package("remotes")
 remotes::install_github("hyunjimoon/SBC")
 ```
 
+The package is already installed if you've ran the setup script.
 ---
 
 # Overview of the SBC package
 
-&lt;img src="overview.png" width="auto" height="500px" /&gt;
+&lt;img src="overview_wide.png" width="780px" height="auto" /&gt;
 
 ---
 
@@ -56,7 +57,7 @@ Stan models should generally go into a specific Stan file (names given on the sl
 
 # Task 1/6 - a Stan model
 
-A Stan model (save as `gamma.stan`)
+A Stan model (already saved in `gamma.stan` if you ran the setup script, otherwise copy and paste to that file)
 
 ```stan
 data {
@@ -97,7 +98,7 @@ Using `rstan`:
 ```r
 library(rstan)
 library(SBC)
-model_gamma &lt;- stan_model("gamma.stan")
+model_gamma &lt;- stan_model("gamma.stan", model_name = "gamma_mod")
 
 backend_gamma &lt;- SBC_backend_rstan_sample(
     model_gamma, # &lt;- model is first argument
@@ -254,6 +255,11 @@ in your `model` or `transformed parameters` block. You don't need to change anyt
 ---
 
 # Bonus Task 2
+
+z-score is another measure on how extreme the "true" simulated value is with respect to the posterior.
+It is the difference between the true value  and posterior mean standardized by dividing by the standard deviations of the posterior.
+
+`$$z = \frac{\theta_{\mathrm{true}} - \mathrm{mean_{post}}}{\mathrm{sd_{post}}}$$`
 
 You can inspect a detailed report of the "true" simulated values, their rank and z-score
 in the posterior and summaries of the posterior distribution via `results_gamma$stats`.
