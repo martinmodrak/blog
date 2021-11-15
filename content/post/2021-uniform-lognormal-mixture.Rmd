@@ -278,9 +278,9 @@ Note that the `get_dpar` helper that simplifies some bookeeping is currently int
 With that, we can do a posterior predictive check for both models. We use only single core for predictions, because on Windows, multicore is slow and will not be able to access the custom prediction functions.
 
 ```{r, warning=FALSE}
-pp_mix <- pp_check(fit_mix, type = "dens_overlay", nsamples = 100,  cores = 1)  +
+pp_mix <- pp_check(fit_mix, type = "dens_overlay", ndraws = 100,  cores = 1)  +
   ggtitle("Mixture")
-pp_base <- pp_check(fit_base, type = "dens_overlay", nsamples = 100,  cores = 1) +
+pp_base <- pp_check(fit_base, type = "dens_overlay", ndraws = 100,  cores = 1) +
   ggtitle("Shifted lognormal")
 pp_mix / pp_base
 ```
@@ -417,8 +417,8 @@ fit_mix_multivar
 Testing that predictions work even for multivariate models. Note that we don't bother with censoring for `rt2` so the predictions look wrong.
 
 ```{r, warning=FALSE}
-pp_check(fit_mix_multivar, resp = "rt", nsamples = 30, cores = 1)
-pp_check(fit_mix_multivar, resp = "rt2", nsamples = 30, cores = 1)
+pp_check(fit_mix_multivar, resp = "rt", ndraws = 30, cores = 1)
+pp_check(fit_mix_multivar, resp = "rt2", ndraws = 30, cores = 1)
 ```
 
 

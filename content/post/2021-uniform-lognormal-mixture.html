@@ -158,21 +158,21 @@ fit_mix</code></pre>
 ##   Links: mu = identity; sigma = identity; mix = identity; shiftprop = identity 
 ## Formula: rt | vreal(max_shift, upper) ~ x 
 ##    Data: dd (Number of observations: 100) 
-## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
-##          total post-warmup samples = 4000
+##   Draws: 4 chains, each with iter = 1000; warmup = 0; thin = 1;
+##          total post-warmup draws = 4000
 ## 
 ## Population-Level Effects: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## Intercept     0.33      0.07     0.20     0.48 1.00     2096     2242
+## Intercept     0.33      0.07     0.20     0.48 1.00     2097     2242
 ## x             0.44      0.05     0.33     0.54 1.00     2368     2460
 ## 
 ## Family Specific Parameters: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 ## sigma         0.45      0.05     0.36     0.56 1.00     2379     1976
-## mix           0.13      0.05     0.05     0.24 1.00     3158     2589
-## shiftprop     0.82      0.18     0.32     1.00 1.00     1639     1623
+## mix           0.13      0.05     0.05     0.24 1.00     3159     2589
+## shiftprop     0.82      0.18     0.32     1.00 1.00     1640     1623
 ## 
-## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
 ## and Tail_ESS are effective sample size measures, and Rhat is the potential
 ## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <p>We note that we have quite good recovery of the effect of <code>x</code> (simulated as 0.5)
@@ -186,20 +186,20 @@ fit_base</code></pre>
 ##   Links: mu = identity; sigma = identity; ndt = identity 
 ## Formula: rt ~ x 
 ##    Data: dd (Number of observations: 100) 
-## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
-##          total post-warmup samples = 4000
+##   Draws: 4 chains, each with iter = 1000; warmup = 0; thin = 1;
+##          total post-warmup draws = 4000
 ## 
 ## Population-Level Effects: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## Intercept     0.34      0.09     0.16     0.53 1.00     1959     1949
-## x             0.47      0.07     0.33     0.61 1.00     2712     2495
+## Intercept     0.34      0.09     0.16     0.53 1.00     1958     1949
+## x             0.47      0.07     0.33     0.61 1.00     2711     2495
 ## 
 ## Family Specific Parameters: 
 ##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 ## sigma     0.69      0.07     0.56     0.82 1.00     1883     1802
-## ndt       0.34      0.07     0.17     0.44 1.00     1633     1420
+## ndt       0.34      0.07     0.17     0.44 1.00     1634     1420
 ## 
-## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
 ## and Tail_ESS are effective sample size measures, and Rhat is the potential
 ## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <p>We see that the inferences for <code>sigma</code> are a bit biased but this is not necessarily only due to the mixture,
@@ -280,21 +280,21 @@ fit_mix_cens</code></pre>
 ##   Links: mu = identity; sigma = identity; mix = identity; shiftprop = identity 
 ## Formula: rt | vreal(max_shift, upper) + cens(censored) ~ x 
 ##    Data: dd_cens (Number of observations: 110) 
-## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
-##          total post-warmup samples = 4000
+##   Draws: 4 chains, each with iter = 1000; warmup = 0; thin = 1;
+##          total post-warmup draws = 4000
 ## 
 ## Population-Level Effects: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 ## Intercept     0.46      0.08     0.34     0.65 1.00     2022     1674
-## x            -0.23      0.07    -0.38    -0.12 1.00     2093     1606
+## x            -0.23      0.07    -0.38    -0.12 1.00     2094     1606
 ## 
 ## Family Specific Parameters: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 ## sigma         0.36      0.07     0.26     0.53 1.00     2019     2565
-## mix           0.15      0.05     0.07     0.25 1.00     2942     2595
-## shiftprop     1.00      0.00     1.00     1.00 1.00     4000     4000
+## mix           0.15      0.05     0.07     0.25 1.00     2943     2595
+## shiftprop     1.00      0.00     1.00     1.00   NA       NA       NA
 ## 
-## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
 ## and Tail_ESS are effective sample size measures, and Rhat is the potential
 ## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <p>It works and the inferences are reasonably close to what we simulated with. A more
@@ -321,15 +321,15 @@ posterior_predict_RTmixture &lt;- function(i, prep, ...) {
   upper &lt;- prep$data$vreal2[i] 
   shift = shiftprop * max_shift 
    
-  rRTmixture(prep$nsamples, meanlog = mu, sdlog = sigma,  
+  rRTmixture(prep$ndraws, meanlog = mu, sdlog = sigma,  
              mix = mix, shift = shift, upper = upper) 
 } 
  </code></pre>
 <p>Note that the <code>get_dpar</code> helper that simplifies some bookeeping is currently internal in <code>brms</code>, but <a href="https://github.com/paul-buerkner/brms/issues/1131">will be exposed</a> in upcoming release.</p>
 <p>With that, we can do a posterior predictive check for both models. We use only single core for predictions, because on Windows, multicore is slow and will not be able to access the custom prediction functions.</p>
-<pre class="r"><code>pp_mix &lt;- pp_check(fit_mix, type = &quot;dens_overlay&quot;, nsamples = 100,  cores = 1)  +
+<pre class="r"><code>pp_mix &lt;- pp_check(fit_mix, type = &quot;dens_overlay&quot;, ndraws = 100,  cores = 1)  +
   ggtitle(&quot;Mixture&quot;)
-pp_base &lt;- pp_check(fit_base, type = &quot;dens_overlay&quot;, nsamples = 100,  cores = 1) +
+pp_base &lt;- pp_check(fit_base, type = &quot;dens_overlay&quot;, ndraws = 100,  cores = 1) +
   ggtitle(&quot;Shifted lognormal&quot;)
 pp_mix / pp_base</code></pre>
 <p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
@@ -434,8 +434,8 @@ fit_mix_all</code></pre>
 ## Formula: rt | vreal(max_shift, upper) + cens(censored) ~ x 
 ##          mix ~ 1 + (1 | subject_id)
 ##    Data: dd_subj (Number of observations: 110) 
-## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
-##          total post-warmup samples = 4000
+##   Draws: 4 chains, each with iter = 1000; warmup = 0; thin = 1;
+##          total post-warmup draws = 4000
 ## 
 ## Group-Level Effects: 
 ## ~subject_id (Number of levels: 12) 
@@ -445,15 +445,15 @@ fit_mix_all</code></pre>
 ## Population-Level Effects: 
 ##               Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 ## Intercept         0.45      0.07     0.33     0.62 1.00     3586     2305
-## mix_Intercept    -2.05      0.44    -2.96    -1.25 1.00     4206     2807
-## x                -0.22      0.06    -0.37    -0.11 1.00     3714     2666
+## mix_Intercept    -2.05      0.44    -2.96    -1.25 1.00     4207     2807
+## x                -0.22      0.06    -0.37    -0.11 1.00     3715     2666
 ## 
 ## Family Specific Parameters: 
 ##           Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## sigma         0.37      0.07     0.26     0.54 1.00     3535     3025
-## shiftprop     1.00      0.00     1.00     1.00 1.00     4000     4000
+## sigma         0.37      0.07     0.26     0.54 1.00     3534     3025
+## shiftprop     1.00      0.00     1.00     1.00   NA       NA       NA
 ## 
-## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
 ## and Tail_ESS are effective sample size measures, and Rhat is the potential
 ## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <p>Checking that posterior predictions work:</p>
@@ -505,8 +505,8 @@ fit_mix_multivar &lt;- brm(
 ##          rt2 | vreal(max_shift2, upper2) + cens(censored2) ~ x2 
 ##          mix ~ 1 + (1 | p | subject_id)
 ##    Data: dd_both (Number of observations: 100) 
-## Samples: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
-##          total post-warmup samples = 4000
+##   Draws: 4 chains, each with iter = 1000; warmup = 0; thin = 1;
+##          total post-warmup draws = 4000
 ## 
 ## Group-Level Effects: 
 ## ~subject_id (Number of levels: 12) 
@@ -515,33 +515,33 @@ fit_mix_multivar &lt;- brm(
 ## sd(mix_rt2_Intercept)                       0.37      0.27     0.02     1.01
 ## cor(mix_rt_Intercept,mix_rt2_Intercept)     0.00      0.58    -0.95     0.95
 ##                                         Rhat Bulk_ESS Tail_ESS
-## sd(mix_rt_Intercept)                    1.00     2712     1787
+## sd(mix_rt_Intercept)                    1.00     2713     1787
 ## sd(mix_rt2_Intercept)                   1.00     2587     2046
-## cor(mix_rt_Intercept,mix_rt2_Intercept) 1.00     4330     2836
+## cor(mix_rt_Intercept,mix_rt2_Intercept) 1.00     4331     2836
 ## 
 ## Population-Level Effects: 
 ##                   Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## rt_Intercept          0.30      0.06     0.18     0.43 1.00     4739     3085
-## mix_rt_Intercept     -2.28      0.54    -3.50    -1.35 1.00     4033     1843
+## rt_Intercept          0.30      0.06     0.18     0.43 1.00     4743     3085
+## mix_rt_Intercept     -2.28      0.54    -3.50    -1.35 1.00     4035     1843
 ## rt2_Intercept         0.43      0.08     0.31     0.60 1.00     3258     1826
-## mix_rt2_Intercept    -1.91      0.44    -2.80    -1.11 1.00     4455     3016
-## rt_x                  0.46      0.05     0.36     0.56 1.00     5438     2978
-## rt2_x2               -0.25      0.07    -0.40    -0.13 1.00     3314     2106
+## mix_rt2_Intercept    -1.91      0.44    -2.80    -1.11 1.00     4456     3016
+## rt_x                  0.46      0.05     0.36     0.56 1.00     5440     2978
+## rt2_x2               -0.25      0.07    -0.40    -0.13 1.00     3316     2106
 ## 
 ## Family Specific Parameters: 
 ##               Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## sigma_rt          0.49      0.05     0.40     0.60 1.00     4904     3014
-## sigma_rt2         0.36      0.07     0.25     0.53 1.00     3451     2885
-## shiftprop_rt      1.00      0.00     1.00     1.00 1.00     4000     4000
-## shiftprop_rt2     1.00      0.00     1.00     1.00 1.00     4000     4000
+## sigma_rt          0.49      0.05     0.40     0.60 1.00     4907     3014
+## sigma_rt2         0.36      0.07     0.25     0.53 1.00     3449     2885
+## shiftprop_rt      1.00      0.00     1.00     1.00   NA       NA       NA
+## shiftprop_rt2     1.00      0.00     1.00     1.00   NA       NA       NA
 ## 
-## Samples were drawn using sample(hmc). For each parameter, Bulk_ESS
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
 ## and Tail_ESS are effective sample size measures, and Rhat is the potential
 ## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
 <p>Testing that predictions work even for multivariate models. Note that we don’t bother with censoring for <code>rt2</code> so the predictions look wrong.</p>
-<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt&quot;, nsamples = 30, cores = 1)</code></pre>
+<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt&quot;, ndraws = 30, cores = 1)</code></pre>
 <p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
-<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt2&quot;, nsamples = 30, cores = 1)</code></pre>
+<pre class="r"><code>pp_check(fit_mix_multivar, resp = &quot;rt2&quot;, ndraws = 30, cores = 1)</code></pre>
 <p><img src="/post/2021-uniform-lognormal-mixture_files/figure-html/unnamed-chunk-19-2.png" width="672" /></p>
 <p>But here we’ll also have to face possibly the biggest problem with <code>brms</code>: that it becomes <em>very</em> easy to specify a model that is too complex to be well informed by the data we have or to even build a completely broken model that no amount of data will save. The data and a few settings for the “crazy” models shown above have actually had to be tweaked for them to work well for this post. So enjoy with moderation :-).</p>
 <p>Again, if you want the complete code, packaged in a single file you
@@ -553,67 +553,70 @@ me (<span class="citation">@martinmodrak</span>) in the question!</p>
 <div id="original-computing-environment" class="section level2">
 <h2>Original computing environment</h2>
 <pre class="r"><code>sessionInfo()</code></pre>
-<pre><code>## R version 4.0.3 (2020-10-10)
+<pre><code>## R version 4.1.0 (2021-05-18)
 ## Platform: x86_64-w64-mingw32/x64 (64-bit)
 ## Running under: Windows 10 x64 (build 18363)
 ## 
 ## Matrix products: default
 ## 
 ## locale:
-## [1] LC_COLLATE=Czech_Czechia.1250  LC_CTYPE=Czech_Czechia.1250   
-## [3] LC_MONETARY=Czech_Czechia.1250 LC_NUMERIC=C                  
-## [5] LC_TIME=Czech_Czechia.1250    
+## [1] LC_COLLATE=English_United States.1252 
+## [2] LC_CTYPE=English_United States.1252   
+## [3] LC_MONETARY=English_United States.1252
+## [4] LC_NUMERIC=C                          
+## [5] LC_TIME=English_United States.1252    
 ## 
 ## attached base packages:
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## other attached packages:
-##  [1] bayesplot_1.8.0 patchwork_1.1.1 knitr_1.31      forcats_0.5.1  
-##  [5] stringr_1.4.0   dplyr_1.0.4     purrr_0.3.4     readr_1.4.0    
-##  [9] tidyr_1.1.2     tibble_3.0.6    ggplot2_3.3.3   tidyverse_1.3.0
-## [13] brms_2.15.0     Rcpp_1.0.6      cmdstanr_0.3.0 
+##  [1] bayesplot_1.8.1     patchwork_1.1.1     knitr_1.33         
+##  [4] forcats_0.5.1       stringr_1.4.0       dplyr_1.0.7        
+##  [7] purrr_0.3.4         readr_2.0.1         tidyr_1.1.3        
+## [10] tibble_3.1.3        ggplot2_3.3.5       tidyverse_1.3.1    
+## [13] brms_2.16.2         Rcpp_1.0.7          cmdstanr_0.4.0.9000
 ## 
 ## loaded via a namespace (and not attached):
 ##   [1] readxl_1.3.1         backports_1.2.1      plyr_1.8.6          
-##   [4] igraph_1.2.6         splines_4.0.3        crosstalk_1.1.1     
-##   [7] TH.data_1.0-10       rstantools_2.1.1     inline_0.3.17       
-##  [10] digest_0.6.27        htmltools_0.5.1.1    rsconnect_0.8.16    
-##  [13] fansi_0.4.2          magrittr_2.0.1       modelr_0.1.8        
-##  [16] RcppParallel_5.0.3   matrixStats_0.58.0   xts_0.12.1          
-##  [19] sandwich_3.0-0       prettyunits_1.1.1    colorspace_2.0-0    
-##  [22] rvest_0.3.6          haven_2.3.1          xfun_0.22           
-##  [25] callr_3.5.1          crayon_1.4.1         jsonlite_1.7.2      
-##  [28] lme4_1.1-26          survival_3.2-7       zoo_1.8-8           
-##  [31] glue_1.4.2           gtable_0.3.0         emmeans_1.5.4       
-##  [34] V8_3.4.0             pkgbuild_1.2.0       rstan_2.26.1        
-##  [37] abind_1.4-5          scales_1.1.1         mvtnorm_1.1-1       
-##  [40] DBI_1.1.1            miniUI_0.1.1.1       xtable_1.8-4        
-##  [43] stats4_4.0.3         StanHeaders_2.26.1   DT_0.17             
-##  [46] htmlwidgets_1.5.3    httr_1.4.2           threejs_0.3.3       
-##  [49] ellipsis_0.3.1       farver_2.0.3         pkgconfig_2.0.3     
-##  [52] loo_2.4.1            sass_0.3.1           dbplyr_2.1.0        
-##  [55] utf8_1.1.4           labeling_0.4.2       tidyselect_1.1.0    
-##  [58] rlang_0.4.10         reshape2_1.4.4       later_1.1.0.1       
-##  [61] munsell_0.5.0        cellranger_1.1.0     tools_4.0.3         
-##  [64] cli_2.3.1            generics_0.1.0       broom_0.7.5         
+##   [4] igraph_1.2.6         splines_4.1.0        crosstalk_1.1.1     
+##   [7] rstantools_2.1.1     inline_0.3.19        digest_0.6.27       
+##  [10] htmltools_0.5.1.1    rsconnect_0.8.24     fansi_0.5.0         
+##  [13] magrittr_2.0.1       checkmate_2.0.0      tzdb_0.1.2          
+##  [16] modelr_0.1.8         RcppParallel_5.1.4   matrixStats_0.61.0  
+##  [19] xts_0.12.1           prettyunits_1.1.1    colorspace_2.0-2    
+##  [22] rvest_1.0.1          haven_2.4.3          xfun_0.25           
+##  [25] callr_3.7.0          crayon_1.4.1         jsonlite_1.7.2      
+##  [28] lme4_1.1-27.1        zoo_1.8-9            glue_1.4.2          
+##  [31] gtable_0.3.0         V8_3.4.2             distributional_0.2.2
+##  [34] pkgbuild_1.2.0       rstan_2.26.3         abind_1.4-5         
+##  [37] scales_1.1.1         mvtnorm_1.1-2        DBI_1.1.1           
+##  [40] miniUI_0.1.1.1       xtable_1.8-4         stats4_4.1.0        
+##  [43] StanHeaders_2.26.3   DT_0.18              htmlwidgets_1.5.3   
+##  [46] httr_1.4.2           threejs_0.3.3        posterior_1.0.1     
+##  [49] ellipsis_0.3.2       pkgconfig_2.0.3      loo_2.4.1           
+##  [52] farver_2.1.0         sass_0.4.0           dbplyr_2.1.1        
+##  [55] utf8_1.2.2           labeling_0.4.2       tidyselect_1.1.1    
+##  [58] rlang_0.4.11         reshape2_1.4.4       later_1.2.0         
+##  [61] munsell_0.5.0        cellranger_1.1.0     tools_4.1.0         
+##  [64] cli_3.0.1            generics_0.1.0       broom_0.7.9         
 ##  [67] ggridges_0.5.3       evaluate_0.14        fastmap_1.1.0       
-##  [70] yaml_2.2.1           processx_3.4.5       fs_1.5.0            
-##  [73] nlme_3.1-149         mime_0.10            projpred_2.0.2      
-##  [76] xml2_1.3.2           rstudioapi_0.13      compiler_4.0.3      
-##  [79] shinythemes_1.2.0    curl_4.3             gamm4_0.2-6         
-##  [82] reprex_1.0.0         statmod_1.4.35       bslib_0.2.4         
-##  [85] stringi_1.5.3        highr_0.8            ps_1.5.0            
-##  [88] blogdown_1.2.3       Brobdingnag_1.2-6    lattice_0.20-41     
-##  [91] Matrix_1.2-18        nloptr_1.2.2.2       markdown_1.1        
-##  [94] shinyjs_2.0.0        vctrs_0.3.6          pillar_1.5.0        
-##  [97] lifecycle_1.0.0      jquerylib_0.1.3      bridgesampling_1.0-0
-## [100] estimability_1.3     cowplot_1.1.1        httpuv_1.5.5        
-## [103] R6_2.5.0             bookdown_0.21        promises_1.2.0.1    
-## [106] gridExtra_2.3        codetools_0.2-16     boot_1.3-25         
-## [109] colourpicker_1.1.0   MASS_7.3-53          gtools_3.8.2        
-## [112] assertthat_0.2.1     withr_2.4.1          shinystan_2.5.0     
-## [115] multcomp_1.4-16      mgcv_1.8-33          parallel_4.0.3      
-## [118] hms_1.0.0            grid_4.0.3           coda_0.19-4         
-## [121] minqa_1.2.4          rmarkdown_2.7        shiny_1.6.0         
-## [124] lubridate_1.7.9.2    base64enc_0.1-3      dygraphs_1.1.1.6</code></pre>
+##  [70] yaml_2.2.1           processx_3.5.2       fs_1.5.0            
+##  [73] nlme_3.1-152         mime_0.11            projpred_2.0.2      
+##  [76] xml2_1.3.2           compiler_4.1.0       shinythemes_1.2.0   
+##  [79] rstudioapi_0.13      curl_4.3.2           gamm4_0.2-6         
+##  [82] reprex_2.0.1         bslib_0.2.5.1        stringi_1.7.3       
+##  [85] highr_0.9            ps_1.6.0             blogdown_1.5        
+##  [88] Brobdingnag_1.2-6    lattice_0.20-44      Matrix_1.3-3        
+##  [91] nloptr_1.2.2.2       markdown_1.1         shinyjs_2.0.0       
+##  [94] tensorA_0.36.2       vctrs_0.3.8          pillar_1.6.2        
+##  [97] lifecycle_1.0.0      jquerylib_0.1.4      bridgesampling_1.1-2
+## [100] cowplot_1.1.1        httpuv_1.6.1         R6_2.5.0            
+## [103] bookdown_0.22        promises_1.2.0.1     gridExtra_2.3       
+## [106] codetools_0.2-18     boot_1.3-28          colourpicker_1.1.0  
+## [109] MASS_7.3-54          gtools_3.9.2         assertthat_0.2.1    
+## [112] withr_2.4.2          shinystan_2.5.0      mgcv_1.8-35         
+## [115] parallel_4.1.0       hms_1.1.0            grid_4.1.0          
+## [118] coda_0.19-4          minqa_1.2.4          rmarkdown_2.10      
+## [121] shiny_1.6.0          lubridate_1.7.10     base64enc_0.1-3     
+## [124] dygraphs_1.1.1.6</code></pre>
 </div>

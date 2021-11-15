@@ -112,7 +112,7 @@ posterior_predict_RTmixture <- function(i, prep, ...) {
   upper <- prep$data$vreal2[i]
   shift = shiftprop * max_shift
   
-  rRTmixture(prep$nsamples, meanlog = mu, sdlog = sigma, 
+  rRTmixture(prep$ndraws, meanlog = mu, sdlog = sigma, 
              mix = mix, shift = shift, upper = upper)
 }
 
