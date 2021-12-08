@@ -11,18 +11,26 @@ draft: TRUE
 library(cmdstanr)
 library(bayesplot)
 options(mc.cores = parallel::detectCores())
+
+# Includes sd, intercept, and the first two and last two varying intercepts
+my_pars <- function(group_basename, N_groups) {
+  c("group_sd", "intercept", paste0(group_basename, "[", c(1,2,N_groups - 1, N_groups), "]"))
+}
+
+my_transformations <- list(group_sd = "log")
 ```
 
 ```{r}
-#set.seed(24555202)
 set.seed(5422335)
-N <- 10
-N_groups <- 5
+N <- 40
+N_groups <- 20
+
 groups <- rep(1:N_groups, length.out = N)
-group_sd <- abs(rnorm(1))
+
+intercept <- 3 
+group_sd <- 1
 group_r <- rnorm(N_groups, sd = group_sd)
 
-intercept <- rnorm(1, mean = 5, sd = 2) 
 mu <- intercept + group_r[groups]
 y <- rpois(N, exp(mu))
 
@@ -54,7 +62,7 @@ transformed parameters {
 }
 
 model {
-  intercept ~ normal(5, 2);
+  intercept ~ normal(3,1);
   group_z ~ std_normal();
   group_sd ~ normal(0, 1);
   y ~ poisson_log(intercept + group_r[groups]);
@@ -65,18 +73,25 @@ model {
 model_nc <- cmdstan_model(write_stan_file(model_code_nc))
 ```
 ```{r}
-fit_nc <- model_nc$sample(data = data_stan, refresh = 1000)
+fit_nc$summary()
 ```
+
 
 ```{r}
-mcmc_pairs(fit_nc$draws(), pars = c("group_sd", "intercept"), regex_pars = "group_z", np = nuts_params(fit_nc), transformations = list("group_sd" = "log"))
+fit_nc <- model_nc$sample(data = data_stan, refresh = 0)
 ```
-
-## Centered
 
 ```{r}
 fit_nc$summary()
 ```
+
+```{r}
+mcmc_pairs(fit_nc$draws(), pars = my_pars("group_z", N_groups), transformations = my_transformations, np = nuts_params(fit_nc))
+```
+
+## Centered
+
+
 
 ```{r}
 model_code_c <- "
@@ -94,7 +109,7 @@ parameters {
 }
 
 model {
-  intercept ~ normal(5, 2);
+  intercept ~ normal(3,1);
   group_r ~ normal(0, group_sd);
   group_sd ~ normal(0, 1);
   y ~ poisson_log(intercept + group_r[groups]);
@@ -105,14 +120,14 @@ model {
 model_c <- cmdstan_model(write_stan_file(model_code_c))
 ```
 ```{r}
-fit_c <- model_c$sample(data = data_stan, refresh = 1000)
+fit_c <- model_c$sample(data = data_stan, refresh = 0)
 ```
 ```{r}
 fit_c$summary()
 ```
 
 ```{r}
-mcmc_pairs(fit_c$draws(), pars = c("group_sd", "intercept"), regex_pars = "group_r", np = nuts_params(fit_c), transformations = list("group_sd" = "log"))
+mcmc_pairs(fit_c$draws(), pars = my_pars("group_r", N_groups), transformations = my_transformations, np = nuts_params(fit_c))
 ```
 
 ## Centered - sum to zero
@@ -167,7 +182,7 @@ transformed parameters {
 }
 
 model {
-  intercept ~ normal(5, 2);
+  intercept ~ normal(3,1);
   group_r_raw ~ normal(0, group_sd);
   group_sd ~ normal(0, 1);
   y ~ poisson_log(intercept + group_r[groups]);
@@ -178,15 +193,14 @@ model {
 model_c_sz <- cmdstan_model(write_stan_file(model_code_c_sz))
 ```
 ```{r}
-fit_c_sz <- model_c_sz$sample(data = data_stan)
+fit_c_sz <- model_c_sz$sample(data = data_stan, refresh = 0)
 ```
 ```{r}
 fit_c_sz$summary()
 ```
 
 ```{r}
-mcmc_pairs(fit_c_sz$draws(), pars = c("group_sd", "intercept"), regex_pars = "group_r_raw", np = nuts_params(fit_c_sz),
-           transformations = list("group_sd" = "log"))
+mcmc_pairs(fit_c_sz$draws(), pars = my_pars("group_r_raw", N_groups - 1), transformations = my_transformations, np = nuts_params(fit_c_sz))
 ```
 
 ## Non-centered - sum to zero
@@ -241,7 +255,7 @@ transformed parameters {
 }
 
 model {
-  intercept ~ normal(5, 2);
+  intercept ~ normal(3,1);
   group_r_raw ~ normal(0, 1);
   group_sd ~ normal(0, 1);
   y ~ poisson_log(intercept + group_r[groups]);
@@ -259,8 +273,7 @@ fit_nc_sz$summary()
 ```
 
 ```{r}
-mcmc_pairs(fit_nc_sz$draws(), pars = c("group_sd", "intercept"), regex_pars = "group_r_raw", np = nuts_params(fit_nc_sz),
-           transformations = list("group_sd" = "log"))
+mcmc_pairs(fit_nc_sz$draws(), pars = my_pars("group_r_raw", N_groups - 1), transformations = my_transformations, np = nuts_params(fit_nc_sz))
 ```
 
 
