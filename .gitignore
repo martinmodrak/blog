@@ -39,5 +39,7 @@ blogdown/
 .DS_Store
 Thumbs.db
 
+/resources/
+
 # Compiled Stan models
 *.exe

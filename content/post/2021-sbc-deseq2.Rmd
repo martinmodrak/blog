@@ -2,7 +2,7 @@
 title: "SBC & DESeq2"
 date: 2021-09-23
 tags: ["R","Stan","SBC"]
-draft:TRUE
+draft: TRUE
 ---
   
 Let's setup the environment.
@@ -15,8 +15,11 @@ library(ggplot2)
 library(DESeq2) 
 library(apeglm)
 
+# Setup multiprocessing
 library(future)
 plan(multisession)
+
+theme_set(cowplot::theme_cowplot())
 
 # Setup caching of results
 cache_dir <- "./_sbc_deseq2_cache/"
@@ -197,13 +200,33 @@ res20_apeglm <- compute_results(datasets20, SBC_backend_DESeq2(shrink_type = "ap
                         keep_fits = FALSE)
 ```
 
+```{r}
+library(tidyverse)
+save_dir <- "_sbc_deseq2_cache/"
+
+rank_hist_1 <- plot_rank_hist(res20_apeglm, parameters = "beta[109]")
+ggsave(file.path(save_dir, "20_rank_hist1.png"), rank_hist_1)
+plot_ecdf_diff(res20_apeglm, parameters = "beta[109]")
+ggsave(file.path(save_dir, "20_ecdf_diff1.png"))
+plot_coverage(res20_apeglm, parameters = "beta[109]")
+ggsave(file.path(save_dir, "20_coverage1.png"))
+
+empirical_coverage(res20_apeglm$stats %>% filter(parameter == "beta[109]"),width = c(0.5,0.9,0.95))
+empirical_coverage(res20_apeglm$stats %>% filter(parameter == "beta[108]"),width = c(0.5,0.9,0.95))
+```
+
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
 plot_rank_hist(res20_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "20_rank_hist_many.png"))
 plot_ecdf_diff(res20_apeglm, parameters = pars_to_show)
-plot_sim_estimated(res20_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "20_ecdf_diff_many.png"))
 plot_coverage(res20_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "20_coverage_many.png"))
+plot_sim_estimated(res20_apeglm, parameters = pars_to_show, alpha = 0.1)
+ggsave(file.path(save_dir, "20_sim_estimated_many.png"))
+
 ```
 
 
@@ -213,14 +236,29 @@ res3_apeglm <- compute_results(datasets3, SBC_backend_DESeq2(shrink_type = "apeg
                          cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_apeglm"),
                         keep_fits = FALSE)
 ```
+```{r}
+rank_hist_1 <- plot_rank_hist(res3_apeglm, parameters = "beta[745]")
+ggsave(file.path(save_dir, "3_rank_hist1.png"), rank_hist_1)
+plot_ecdf_diff(res3_apeglm, parameters = "beta[745]")
+ggsave(file.path(save_dir, "3_ecdf_diff1.png"))
+plot_coverage(res3_apeglm, parameters = "beta[745]")
+ggsave(file.path(save_dir, "3_coverage1.png"))
+
+empirical_coverage(res3_apeglm$stats %>% filter(parameter == "beta[745]"), c(0.5,0.9,0.95))
+
+```
 
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
 plot_rank_hist(res3_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "3_rank_hist_many.png"))
 plot_ecdf_diff(res3_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "3_ecdf_diff_many.png"))
 plot_sim_estimated(res3_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "3_sim_estimated_many.png"))
 plot_coverage(res3_apeglm, parameters = pars_to_show)
+ggsave(file.path(save_dir, "3_coverage_many.png"))
 ```
 
 
