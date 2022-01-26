@@ -13,8 +13,8 @@ library(bayesplot)
 options(mc.cores = parallel::detectCores())
 
 # Includes sd, intercept, and the first two and last two varying intercepts
-my_pars <- function(group_basename, N_groups) {
-  c("group_sd", "intercept", paste0(group_basename, "[", c(1,2,N_groups - 1, N_groups), "]"))
+my_pars <- function(group_basename, N_groups, intercept_name = "intercept") {
+  c("group_sd", intercept_name, paste0(group_basename, "[", c(1,2,N_groups - 1, N_groups), "]"))
 }
 
 my_transformations <- list(group_sd = "log")
@@ -23,7 +23,7 @@ my_transformations <- list(group_sd = "log")
 ```{r}
 set.seed(5422335)
 N <- 40
-N_groups <- 2
+N_groups <- 20
 
 groups <- rep(1:N_groups, length.out = N)
 
@@ -292,9 +292,15 @@ fit_suff_c$summary()
 ```{r}
 mcmc_pairs(fit_suff_c$draws(), pars = c("group_sd", "intercept_sweep", paste0("group_r_raw[", c(1, 2, N_groups - 1), "]")), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)
 
-mcmc_pairs(fit_suff_c$draws(), pars = c("group_sd", "intercept_sweep", paste0("group_r_raw[", c(1), "]"), "mean_group_r_raw"), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)
+# mcmc_pairs(fit_suff_c$draws(), pars = c("group_sd", "intercept_sweep", paste0("group_r_raw[", c(1), "]"), "mean_group_r_raw"), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)
 
 ```
+
+```{r}
+mcmc_pairs(fit_suff_c$draws(), regex_pars = c("m_R", "sigma_R"))
+
+```
+
 
 ### SBC test
 
@@ -339,8 +345,8 @@ generator <- function(N, N_groups) {
 
 set.seed(5465524)
 
-generator_c <- SBC_generator_function(generator, N = 50, N_groups = 8)
-datasets_c <- generate_datasets(generator_c, n_datasets = 100)
+generator_c <- SBC_generator_function(generator, N = 50, N_groups = 3)
+datasets_c <- generate_datasets(generator_c, n_datasets = 500)
 
 suff_c_backend <- SBC_backend_cmdstan_sample(model_suff_c, chains = 2)
 SBC_res_suff_c <- compute_results(datasets_c, suff_c_backend, 
@@ -376,14 +382,38 @@ plot_rank_hist(SBC_res_suff_c)
 plot_rank_hist(SBC_res_suff_c[SBC_res_suff_c$backend_diagnostics$n_divergent == 0])
 ```
 
+## Sufficient statistics, non-centered
+
+
 ```{r}
-set.seed(226652233)
+model_suff_nc <- cmdstan_model("intercept_suff_noncentered.stan")
+```
 
-datasets_c_2 <- generate_datasets(generator_c, n_datasets = 300)
 
-SBC_res_suff_c_2 <- 
-  bind_results(SBC_res_suff_c,
-  compute_results(datasets_c_2, suff_c_backend, 
+```{r}
+fit_suff_nc <- model_suff_nc$sample(data = data_stan, refresh = 0)
+```
+
+```{r}
+fit_suff_nc$summary()
+```
+
+```{r}
+mcmc_pairs(fit_suff_nc$draws(), pars = my_pars("group_r_raw", N_groups - 1, "intercept_sweep"), transformations = my_transformations, np = nuts_params(fit_nc))
+
+# mcmc_pairs(fit_suff_nc$draws(), pars = c("group_sd", "intercept_sweep", paste0("group_r_raw[", c(1), "]")), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)
+
+```
+
+
+### SBC Test
+
+```{r}
+suff_nc_backend <- SBC_backend_cmdstan_sample(model_suff_nc, chains = 2)
+generator_nc <- SBC_generator_function(generator, N = 6, N_groups = 3)
+datasets_nc <- generate_datasets(generator_nc, n_datasets = 50)
+
+SBC_res_suff_nc <- compute_results(datasets_c, suff_nc_backend, 
                                   gen_quants = generated_quantities(
                                     mu_r = mean(group_r),
                                     group_r_c = group_r - mean(group_r),
@@ -392,89 +422,24 @@ SBC_res_suff_c_2 <-
                                     log_lik = sum(dpois(y, exp(intercept + group_r[groups]), log = TRUE))),
                                   keep_fits = FALSE,
                                   cache_mode = "results",
-                                  cache_location = file.path(SBC_cache_dir, "suff_c_datasets_c_2.rds"))
-  )
+                                  cache_location = file.path(SBC_cache_dir, "suff_nc_datasets_nc.rds"))
+
 ```
 
 
 ```{r}
-plot_ecdf_diff(SBC_res_suff_c_2)
-plot_ecdf_diff(SBC_res_suff_c_2[SBC_res_suff_c_2$backend_diagnostics$n_divergent == 0])
-plot_rank_hist(SBC_res_suff_c_2)
-plot_rank_hist(SBC_res_suff_c_2[SBC_res_suff_c_2$backend_diagnostics$n_divergent == 0])
-
+plot_ecdf_diff(SBC_res_suff_nc)
+plot_ecdf_diff(SBC_res_suff_nc[SBC_res_suff_nc$backend_diagnostics$n_divergent == 0])
+plot_rank_hist(SBC_res_suff_nc)
+plot_rank_hist(SBC_res_suff_nc[SBC_res_suff_nc$backend_diagnostics$n_divergent == 0])
 ```
 
 ```{r}
-# SBC_res_nc <- compute_results(datasets_c, SBC_backend_cmdstan_sample(model_nc), cache_mode = "results",
-#                                   cache_location = file.path(SBC_cache_dir, "nc_datasets_c.rds"))
+SBC_res_suff_nc$backend_diagnostics
 ```
 ```{r}
-# plot_ecdf_diff(SBC_res_nc)
-# plot_rank_hist(SBC_res_nc)
+fit <- model_suff_nc$sample(datasets_nc$generated[[27]])
+mcmc_pairs(fit$draws(), pars = my_pars("group_r_raw", 2, "intercept_sweep"), transformations = my_transformations, np = nuts_params(fit))
 ```
-
-## Sufficient statistics, non-centered
-
-
-```{r}
-model_code_suff_nc <- "
-data {
-  int<lower=0> N;
-  int<lower=1> N_groups;
-  int<lower=1,upper=N_groups> groups[N];
-  int<lower=0> y[N];
-}
-
-parameters {
-  real intercept_sweep;
-  vector[N_groups - 1] group_z_raw; 
-  real mean_group_z;
-  real<lower=0> group_sd;
-}
-
-transformed parameters {
-  vector[N_groups] group_z_sweep;
-  vector[N_groups] group_z;
-  vector[N_groups] group_r_sweep;
-  group_z_sweep[1:N_groups - 1] = group_z_raw;
-  group_z_sweep[N_groups] = -sum(group_z_raw);
-  group_r_sweep = group_z_sweep * group_sd;
-  
-  //This will need Jacobian
-  intercept = intercept_sweep + mean_group_z * group_sd;
-}
-
-model {
-  intercept ~ normal(3,1);
-  group_z ~ std_normal();
-  group_sd ~ normal(0, 1);
-  y ~ poisson_log(intercept_sweep + group_r_sweep[groups]);
-}
-
-generated quantities {
-  vector[N_groups] group_z = group_z_sweep + mean_group_z;
-  vector[N_groups] group_r = group_z = group_z * group_sd; 
-
-}
-
-"
-
-model_nc <- cmdstan_model(write_stan_file(model_code_nc))
-```
-
-
-```{r}
-fit_nc <- model_nc$sample(data = data_stan, refresh = 0)
-```
-
-```{r}
-fit_nc$summary()
-```
-
-```{r}
-mcmc_pairs(fit_nc$draws(), pars = my_pars("group_z", N_groups), transformations = my_transformations, np = nuts_params(fit_nc))
-```
-
 
 
