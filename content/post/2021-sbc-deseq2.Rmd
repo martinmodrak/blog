@@ -17,7 +17,7 @@ library(apeglm)
 
 # Setup multiprocessing
 library(future)
-plan(multisession)
+plan(tweak(multisession, workers = 4))
 
 theme_set(cowplot::theme_cowplot())
 
@@ -85,7 +85,7 @@ SBC_fit_to_draws_matrix.SBC_fit_DESeq2 <- function(fit) {
 
 
 ```{r}
-SBC_backend_iid_samples.SBC_backend_DEseq2 <- function(backend) {
+SBC_backend_iid_draws.SBC_backend_DEseq2 <- function(backend) {
   TRUE
 }
 ```
@@ -151,8 +151,11 @@ datasets20 <- generate_datasets(SBC_generator_function(
 
 
 ```{r}
-res20 <- compute_results(datasets20, SBC_backend_DESeq2(), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
-                                                          "SBC_backend_iid_samples.SBC_backend_DEseq2"),
+res20 <- compute_results(datasets20, SBC_backend_DESeq2(),
+                         keep_fits = FALSE,
+                         globals = c("SBC_fit.SBC_backend_DEseq2", 
+                                     "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                     "SBC_backend_iid_draws.SBC_backend_DEseq2"),
                          cache_mode = "results", cache_location = file.path(cache_dir, "SBC_20"))
 ```
 
