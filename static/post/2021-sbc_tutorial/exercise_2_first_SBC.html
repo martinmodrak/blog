@@ -17,7 +17,7 @@ class: center, middle, inverse, title-slide
 
 # Excercise 2
 ### Martin Modrák
-### 2021/08/24 (updated: 2021-08-31)
+### 2021/08/24 (updated: 2022-01-26)
 
 ---
 
@@ -111,20 +111,20 @@ backend_gamma &lt;- SBC_backend_rstan_sample(
 
 ---
 
-# Task 3/6 - generating a single dataset
+# Task 3/6 - generating a single simulation
 
 In a format the SBC package undertands...
 
 ```r
 # N - the number of observed datapoints
-single_dataset_gamma &lt;- function(N) {
+single_sim_gamma &lt;- function(N) {
   shape &lt;- rlnorm(n = 1, meanlog =  0, sdlog = 1)
   scale &lt;- rlnorm(n = 1, meanlog = 0, sdlog = 1.5)
   y &lt;- rgamma(N, shape = shape, scale = scale)
   
   list(
     # True, unobserved
-    parameters = list(
+    variables = list(
       shape = shape,
       scale = scale),
     # Observed data, passed directly to Stan
@@ -136,14 +136,14 @@ single_dataset_gamma &lt;- function(N) {
 
 ```
 
-Now calling `single_dataset_gamma(&lt;insert number here&gt;)` creates a single dataset.
+Now calling `single_sim_gamma(&lt;insert number here&gt;)` creates a single dataset.
 Try it! Do you understand the output?
 
 ---
 
 # Question 1/2
 
-Do you see a mismatch between the way `single_dataset_gamma` creates data match the Stan model?
+Do you see a mismatch between the way `single_sim_gamma` creates data match the Stan model?
 
 If yes, write down your guess!
 
@@ -152,36 +152,36 @@ help us!
 
 ---
 
-# Task 4/6 - generating multiple datasets
+# Task 4/6 - generating multiple simulations
 
-Here we build a "generator" object that can be used to create multiple datasets
-and combine them together.
+Here we build a "generator" object that can be used to create multiple simulations
+and combine them together into an `SBC_datasets` object.
 
 ```r
 generator_gamma &lt;- SBC_generator_function(
-  # Passing single_dataset_gamma as a parameter, 
+  # Passing single_sim_gamma as a parameter, 
   # not calling it
-  single_dataset_gamma, 
+  single_sim_gamma, 
   # Additional arguments are passed to the function
   # Here we only use N
   N = 40)
   
 datasets_gamma &lt;- generate_datasets(
   generator_gamma, 
-  n_datasets = 10)
+  n_sims = 10)
 ```
 
-It is good practice to start with just a few datasets 
+It is good practice to start with just a few simulations 
 to quickly check that the model roughly works without wasting too much time.
 
-For this problem 10 datasets should be more than enough.
+For this problem 10 simulations should be more than enough.
 
 ---
 
 # Task 5/6 - run SBC
 
 ```r
-results_gamma &lt;- compute_results(
+results_gamma &lt;- compute_SBC(
                    datasets_gamma, backend_gamma)
 ```
 
@@ -240,10 +240,10 @@ Gamma distribution has multiple parametrizations which are we using?
 Create a copy of `gamma.stan` called `gamma2.stan`. 
 Modify it to match the simulator. (don't know how? there's a hint on the next slide)
 
-Create a new backend (`backend_gamma2`) with the modified model and rerun SBC with the same datasets:
+Create a new backend (`backend_gamma2`) with the modified model and rerun SBC with the same simulations:
 
 ```r
-results_gamma2 &lt;- compute_results(
+results_gamma2 &lt;- compute_SBC(
                    datasets_gamma, backend_gamma2)
 
 ```
@@ -267,14 +267,14 @@ You can inspect a detailed report of the "true" simulated values, their rank and
 in the posterior and summaries of the posterior distribution via `results_gamma$stats`.
 
 Would the z-score column let you figure out the problem more easily than the plots?
-Would inspecting the statistics let you see the failure with fewer datasets/fits than the plots?
+Would inspecting the statistics let you see the failure with fewer simulations than using the plots?
 
 ---
 
 # Bonus Task 3
 
 Play with `N` (the number of datapoints) when creating `generator_gamma`
-and `n_datasets` (the number of datasets/fits) when creating `datasets_gamma`.
+and `n_sims` (the number of simulations) when creating `datasets_gamma`.
 
 Which values let you reliably detect the problem? Which values can keep the problem hidden?
 
