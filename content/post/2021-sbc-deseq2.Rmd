@@ -30,7 +30,7 @@ if(!dir.exists(cache_dir)) {
 ```
 
 ```{r}
-SBC_backend_DESeq2 <- function(shrink_type = "normal", ...) {
+SBC_backend_DESeq2 <- function(shrink_type = "normal", ..., useT = FALSE) {
     shrink_args = list(...)
     if(any(names(shrink_args) %in% c("coef", "contrast", "type"))) {
       #TODO better report error
@@ -38,7 +38,8 @@ SBC_backend_DESeq2 <- function(shrink_type = "normal", ...) {
     }
   
     structure(list(shrink_type = shrink_type, 
-                   shrink_args = shrink_args), class = "SBC_backend_DEseq2")
+                   shrink_args = shrink_args,
+                   useT = useT), class = "SBC_backend_DEseq2")
 }
 
 SBC_fit.SBC_backend_DEseq2 <- function(backend, generated, cores) {
@@ -50,7 +51,8 @@ SBC_fit.SBC_backend_DEseq2 <- function(backend, generated, cores) {
   DESeq2::sizeFactors(dds) <- rep(1, generated$N_per_group * 2)
   
   dds <- DESeq2::DESeq(dds, fitType = "parametric", 
-                       minReplicatesForReplace = Inf, minmu = 1e-10)
+                       minReplicatesForReplace = Inf, minmu = 1e-10,
+                       useT = backend$useT)
   
 #  if(backend$shrink_type != "none") {
   # } else {
@@ -66,20 +68,35 @@ SBC_fit.SBC_backend_DEseq2 <- function(backend, generated, cores) {
 }
 
 SBC_fit_to_draws_matrix.SBC_fit_DESeq2 <- function(fit) {
-  res <- do.call(DESeq2::lfcShrink,
-               c(list(dds = fit$dds, coef = "group_B_vs_A", 
-                      type = fit$backend$shrink_type),
-                 fit$backend$shrink_args))
+  if(fit$backend$shrink_type != "none") {
+    res <- do.call(DESeq2::lfcShrink,
+                 c(list(dds = fit$dds, coef = "group_B_vs_A", 
+                        type = fit$backend$shrink_type),
+                   fit$backend$shrink_args))
+  } else {
+    res <- DESeq2::results(fit$dds, contrast = c("group", "B", "A"))
+  }
 
   n_samps <- 1000
-
+  
+  useT <- "tDegreesFreedom" %in% names(S4Vectors::mcols(fit$dds))
+  if(useT) {
+    df <- unique(S4Vectors::mcols(fit$dds)$tDegreesFreedom)
+    if(length(df) > 1) {
+      stop("Non-unique DF")
+    }
+    base_samps <- rt(n_samps * nrow(res), df = df)
+  } else {
+    base_samps <- rnorm(n_samps * nrow(res))
+  }
   beta_samps <- matrix(res$log2FoldChange, nrow = n_samps, ncol = nrow(res),  byrow = TRUE) +
-      matrix(rnorm(n_samps * nrow(res)), nrow = n_samps, ncol = nrow(res)) *
+      matrix(base_samps, nrow = n_samps, ncol = nrow(res)) *
        matrix(res$lfcSE, nrow = n_samps, ncol = nrow(res),  byrow = TRUE)
 
   posterior::as_draws_matrix(posterior::draws_rvars(beta = posterior::rvar(beta_samps)))
 }
 ```
+
 
 
 
@@ -135,7 +152,7 @@ generator_single_DEseq2 <- function(N_per_group,
   rownames(countData) <- paste0("g", 1:N_genes)
   
   list(
-    parameters = list(beta = beta),
+    variables = list(beta = beta),
     generated = list(N_per_group = N_per_group, countData = countData)
   ) 
 }
@@ -146,12 +163,12 @@ generator_single_DEseq2 <- function(N_per_group,
 set.seed(43216842)
 datasets20 <- generate_datasets(SBC_generator_function(
    generator_single_DEseq2, N_per_group = 20, N_genes = 1000),
-   n_datasets = 1000) 
+   n_sims = 1000) 
 ```
 
 
 ```{r}
-res20 <- compute_results(datasets20, SBC_backend_DESeq2(),
+res20 <- compute_SBC(datasets20, SBC_backend_DESeq2(),
                          keep_fits = FALSE,
                          globals = c("SBC_fit.SBC_backend_DEseq2", 
                                      "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
@@ -162,10 +179,10 @@ res20 <- compute_results(datasets20, SBC_backend_DESeq2(),
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
-plot_rank_hist(res20, parameters = pars_to_show)
-plot_ecdf_diff(res20, parameters = pars_to_show)
-plot_sim_estimated(res20, parameters = pars_to_show)
-plot_coverage(res20, parameters = pars_to_show)
+plot_rank_hist(res20, variables = pars_to_show)
+plot_ecdf_diff(res20, variables = pars_to_show)
+plot_sim_estimated(res20, variables = pars_to_show)
+plot_coverage(res20, variables = pars_to_show)
 ```
 
 
@@ -173,13 +190,13 @@ plot_coverage(res20, parameters = pars_to_show)
 set.seed(26845214)
 datasets3 <- generate_datasets(SBC_generator_function(
    generator_single_DEseq2, N_per_group = 3, N_genes = 1000),
-   n_datasets = 1000) 
+   n_sims = 1000) 
 ```
 
 
 ```{r}
-res3 <- compute_results(datasets3, SBC_backend_DESeq2(), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
-                                                          "SBC_backend_iid_samples.SBC_backend_DEseq2"),
+res3 <- compute_SBC(datasets3, SBC_backend_DESeq2(), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
                          cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3"),
                         keep_fits = FALSE)
 ```
@@ -187,18 +204,56 @@ res3 <- compute_results(datasets3, SBC_backend_DESeq2(), globals = c("SBC_fit.SB
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
-plot_rank_hist(res3, parameters = pars_to_show)
-plot_ecdf_diff(res3, parameters = pars_to_show)
-plot_sim_estimated(res3, parameters = pars_to_show)
-plot_coverage(res3, parameters = pars_to_show)
+plot_rank_hist(res3, variables = pars_to_show)
+plot_ecdf_diff(res3, variables = pars_to_show)
+plot_sim_estimated(res3, variables = pars_to_show)
+plot_coverage(res3, variables = pars_to_show)
+```
+
+```{r}
+cov_3 <- empirical_coverage(res3$stats, width = 0.95)
+hist(cov_3$estimate)
+hist(cov_3$ci_low)
 ```
 
 
+```{r}
+res3_t <- compute_SBC(datasets3, SBC_backend_DESeq2(useT = TRUE), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
+                         cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_T"),
+                        keep_fits = FALSE)
+```
 
 
 ```{r}
-res20_apeglm <- compute_results(datasets20, SBC_backend_DESeq2(shrink_type = "apeglm"), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
-                                                          "SBC_backend_iid_samples.SBC_backend_DEseq2"),
+pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
+plot_rank_hist(res3_t, variables = pars_to_show)
+plot_ecdf_diff(res3_t, variables = pars_to_show)
+plot_sim_estimated(res3_t, variables = pars_to_show)
+plot_coverage(res3_t, variables = pars_to_show)
+```
+
+
+```{r}
+res3_none <- compute_SBC(datasets3, SBC_backend_DESeq2(shrink_type = "none"), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
+                         cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_none"),
+                        keep_fits = FALSE)
+
+```
+
+
+```{r}
+pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
+plot_rank_hist(res3_none, variables = pars_to_show)
+plot_ecdf_diff(res3_none, variables = pars_to_show)
+plot_sim_estimated(res3_none, variables = pars_to_show)
+plot_coverage(res3_none, variables = pars_to_show)
+```
+
+```{r}
+res20_apeglm <- compute_SBC(datasets20, SBC_backend_DESeq2(shrink_type = "apeglm"), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
                          cache_mode = "results", cache_location = file.path(cache_dir, "SBC_20_apeglm"),
                         keep_fits = FALSE)
 ```
@@ -207,60 +262,60 @@ res20_apeglm <- compute_results(datasets20, SBC_backend_DESeq2(shrink_type = "ap
 library(tidyverse)
 save_dir <- "_sbc_deseq2_cache/"
 
-rank_hist_1 <- plot_rank_hist(res20_apeglm, parameters = "beta[109]")
+rank_hist_1 <- plot_rank_hist(res20_apeglm, variables = "beta[109]")
 ggsave(file.path(save_dir, "20_rank_hist1.png"), rank_hist_1)
-plot_ecdf_diff(res20_apeglm, parameters = "beta[109]")
+plot_ecdf_diff(res20_apeglm, variables = "beta[109]")
 ggsave(file.path(save_dir, "20_ecdf_diff1.png"))
-plot_coverage(res20_apeglm, parameters = "beta[109]")
+plot_coverage(res20_apeglm, variables = "beta[109]")
 ggsave(file.path(save_dir, "20_coverage1.png"))
 
-empirical_coverage(res20_apeglm$stats %>% filter(parameter == "beta[109]"),width = c(0.5,0.9,0.95))
-empirical_coverage(res20_apeglm$stats %>% filter(parameter == "beta[108]"),width = c(0.5,0.9,0.95))
+empirical_coverage(res20_apeglm$stats %>% filter(variable == "beta[109]"),width = c(0.5,0.9,0.95))
+empirical_coverage(res20_apeglm$stats %>% filter(variable == "beta[108]"),width = c(0.5,0.9,0.95))
 ```
 
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
-plot_rank_hist(res20_apeglm, parameters = pars_to_show)
+plot_rank_hist(res20_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "20_rank_hist_many.png"))
-plot_ecdf_diff(res20_apeglm, parameters = pars_to_show)
+plot_ecdf_diff(res20_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "20_ecdf_diff_many.png"))
-plot_coverage(res20_apeglm, parameters = pars_to_show)
+plot_coverage(res20_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "20_coverage_many.png"))
-plot_sim_estimated(res20_apeglm, parameters = pars_to_show, alpha = 0.1)
+plot_sim_estimated(res20_apeglm, variables = pars_to_show, alpha = 0.1)
 ggsave(file.path(save_dir, "20_sim_estimated_many.png"))
 
 ```
 
 
 ```{r}
-res3_apeglm <- compute_results(datasets3, SBC_backend_DESeq2(shrink_type = "apeglm"), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
-                                                          "SBC_backend_iid_samples.SBC_backend_DEseq2"),
+res3_apeglm <- compute_SBC(datasets3, SBC_backend_DESeq2(shrink_type = "apeglm"), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
                          cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_apeglm"),
                         keep_fits = FALSE)
 ```
 ```{r}
-rank_hist_1 <- plot_rank_hist(res3_apeglm, parameters = "beta[745]")
+rank_hist_1 <- plot_rank_hist(res3_apeglm, variables = "beta[745]")
 ggsave(file.path(save_dir, "3_rank_hist1.png"), rank_hist_1)
-plot_ecdf_diff(res3_apeglm, parameters = "beta[745]")
+plot_ecdf_diff(res3_apeglm, variables = "beta[745]")
 ggsave(file.path(save_dir, "3_ecdf_diff1.png"))
-plot_coverage(res3_apeglm, parameters = "beta[745]")
+plot_coverage(res3_apeglm, variables = "beta[745]")
 ggsave(file.path(save_dir, "3_coverage1.png"))
 
-empirical_coverage(res3_apeglm$stats %>% filter(parameter == "beta[745]"), c(0.5,0.9,0.95))
+empirical_coverage(res3_apeglm$stats %>% filter(variable == "beta[745]"), c(0.5,0.9,0.95))
 
 ```
 
 
 ```{r}
 pars_to_show <- paste0("beta[", sample(1:1000, size = 12), "]")
-plot_rank_hist(res3_apeglm, parameters = pars_to_show)
+plot_rank_hist(res3_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "3_rank_hist_many.png"))
-plot_ecdf_diff(res3_apeglm, parameters = pars_to_show)
+plot_ecdf_diff(res3_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "3_ecdf_diff_many.png"))
-plot_sim_estimated(res3_apeglm, parameters = pars_to_show)
+plot_sim_estimated(res3_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "3_sim_estimated_many.png"))
-plot_coverage(res3_apeglm, parameters = pars_to_show)
+plot_coverage(res3_apeglm, variables = pars_to_show)
 ggsave(file.path(save_dir, "3_coverage_many.png"))
 ```
 
