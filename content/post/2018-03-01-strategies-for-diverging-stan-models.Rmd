@@ -15,6 +15,10 @@ Now once you have increased ```adapt_delta``` to no avail, what should you do? D
 
 # The strategies
 
+**This list is outdated, the [Guide to Stan warnings](https://mc-stan.org/misc/warnings.html)
+has a better list of debugging hints.** 
+
+
 I don't want to keep you waiting, so below is a list of all strategies I have ever used to diagnose and/or remedy divergences:
 
 1) Check your code. Twice. Divergences are almost as likely a result of a programming error as they are a truly statistical issue. Do all parameters have a prior? Do your array indices and for loops match?
@@ -97,13 +101,14 @@ landscape_plot <- function(d, h = NULL) {
     scale_alpha_continuous(range = c(0,1), trans = "sqrt") +
     scale_fill_continuous(low = "blue", high = "orange") + 
     coord_cartesian(xlim = c(-2.5,2.5), ylim = c(-7, 7)) +
-    guides(alpha = FALSE, fill = FALSE)
+    guides(alpha = "none", fill = "none")
 } 
 
 n_points <- 1000
 smooth_hill <- data.frame( x = rnorm(n_points, 0, 1)) %>% mutate(y = x + rnorm(n_points, 0, 3))
 smooth_hill %>% landscape_plot
 ```
+
 Stan starts each iteration by moving across the posterior in random direction and then lets the density gradient steer the movement preferrentially to areas with high density. To explore the hill efficiently, we need to take quite large steps in this process - the chain of samples will represent the posterior well if it can move across the whole posterior in a small-ish number of steps (actually at most ```2^max_treedepth``` steps). So average step size of something like 0.1 might be reasonable here as the posterior is approximately linear at this scale. We need to spend a bit more time around the center, but not that much, as there is a lot of volume also close to the edges - it has lower density, but it is a larger area. 
 
 Now imagine that the posterior is much sharper:

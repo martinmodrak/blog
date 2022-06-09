@@ -4,7 +4,8 @@ date: 2018-05-14
 tags: ["R","Stan","Divergences"]
 ---
 
-*This is a second post in my series on taming divergences in Stan models, see the [first post in the series](/2018/02/19/taming-divergences-in-stan-models/) for a general introduction. *
+*This is a second post in my series on taming divergences in Stan models, see the [first post in the series](/2018/02/19/taming-divergences-in-stan-models/) for a general introduction. Also see [guide to Stan warnings](https://mc-stan.org/misc/warnings.html)*
+
 
 **Standard caveat:** *I am not an expert on Stan, I consider myself just an advanced user who likes to explain things. Please point out any errors, things that contradict your experience or anything else you do not trust.*
 
@@ -36,6 +37,7 @@ library(knitr)
 library(here)
 library(rgl)
 knit_hooks$set(webgl = hook_webgl)
+theme_set(cowplot::theme_cowplot())
 
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
@@ -288,7 +290,7 @@ pairs(fit_sigmoid2_ok, pars = "energy__", include = FALSE)
 pairs(fit_sigmoid2_divergent, pars = "energy__", include = FALSE)
 ```
 
-Clearly something substantial changed for the second model. But while the interaction of $w$ and $b$ looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot below with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
+Clearly something substantial changed for the second model. But while there is a lot of stuff that looks fishy, it is hard to understand what exactly is going on. The clue is in looking at the interaction of $w$, $k$ and the log posterior (`lp__`) - you can play with the 3D plot below with your mouse. Note that ShinyStan provides similar 3D plots under `Explore -> Trivariate`.
 
 ```{r, webgl=TRUE, message = FALSE}
 samples <- rstan::extract(fit_sigmoid2_divergent)
@@ -491,7 +493,7 @@ We note the good diagnostics and also look at the posterior draws versus the obs
 ```{r, warning = FALSE}
 samples_to_show <- sample(1:4000, 50)
 fit_gp %>% 
-  tidybayes::spread_samples(y_est[x_index]) %>% 
+  tidybayes::spread_draws(y_est[x_index]) %>% 
   inner_join(data.frame(x_index = 1:data_gp$N, x = data_gp$x), by = c("x_index" = "x_index")) %>% 
   mutate(sample_id = (.chain - 1) * 1000 + .iteration ) %>%
   filter(sample_id %in% samples_to_show) %>% 
@@ -576,7 +578,7 @@ In contrast to the neural net example, here the chains do not stick to a single 
 plot_gp_mess <- function(fit_gp_mess) {
   samples_to_show <- sample(1:4000, 50)
   fit_gp_mess %>% 
-    tidybayes::spread_samples(y_est[x_index], x[x_index]) %>% 
+    tidybayes::spread_draws(y_est[x_index], x[x_index]) %>% 
     mutate(sample_id = (.chain - 1) * 1000 + .iteration ) %>%
     filter(sample_id %in% samples_to_show) %>% 
     ggplot(aes(x = x, y = y_est, group = sample_id, color = as.factor(.chain))) + geom_line(alpha = 0.3) +
