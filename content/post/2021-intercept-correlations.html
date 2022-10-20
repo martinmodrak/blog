@@ -1,0 +1,1760 @@
+---
+title: "Correlations between overall intercept and varying intercept"
+date: 2021-12-08
+tags: ["R","Stan","Mixed models"]
+draft: TRUE
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<pre class="r"><code>library(cmdstanr)</code></pre>
+<pre><code>## This is cmdstanr version 0.4.0.9000</code></pre>
+<pre><code>## - CmdStanR documentation and vignettes: mc-stan.org/cmdstanr</code></pre>
+<pre><code>## - CmdStan path: C:/Users/Martin/Documents/.cmdstan/cmdstan-2.28.2</code></pre>
+<pre><code>## - CmdStan version: 2.28.2</code></pre>
+<pre><code>## 
+## A newer version of CmdStan is available. See ?install_cmdstan() to install it.
+## To disable this check set option or environment variable CMDSTANR_NO_VER_CHECK=TRUE.</code></pre>
+<pre class="r"><code>library(bayesplot)</code></pre>
+<pre><code>## Warning: package &#39;bayesplot&#39; was built under R version 4.1.2</code></pre>
+<pre><code>## This is bayesplot version 1.8.1</code></pre>
+<pre><code>## - Online documentation and vignettes at mc-stan.org/bayesplot</code></pre>
+<pre><code>## - bayesplot theme set to bayesplot::theme_default()</code></pre>
+<pre><code>##    * Does _not_ affect other ggplot2 plots</code></pre>
+<pre><code>##    * See ?bayesplot_theme_set for details on theme setting</code></pre>
+<pre class="r"><code>options(mc.cores = parallel::detectCores())
+
+# Includes sd, intercept, and the first two and last two varying intercepts
+my_pars &lt;- function(group_basename, N_groups, intercept_name = &quot;intercept&quot;) {
+  c(&quot;group_sd&quot;, intercept_name, paste0(group_basename, &quot;[&quot;, c(1,2,N_groups - 1, N_groups), &quot;]&quot;))
+}
+
+my_transformations &lt;- list(group_sd = &quot;log&quot;)</code></pre>
+<pre class="r"><code>set.seed(5422335)
+N &lt;- 40
+N_groups &lt;- 20
+
+groups &lt;- rep(1:N_groups, length.out = N)
+
+intercept &lt;- 3 
+group_sd &lt;- 1
+group_r &lt;- rnorm(N_groups, sd = group_sd)
+
+mu &lt;- intercept + group_r[groups]
+y &lt;- rpois(N, exp(mu))
+
+data_stan &lt;- list(N = N,
+                  N_groups = N_groups,
+                  groups = groups,
+                  y = y)</code></pre>
+<div id="non-centered" class="section level2">
+<h2>Non-centered</h2>
+<pre class="r"><code>model_code_nc &lt;- &quot;
+data {
+  int&lt;lower=0&gt; N;
+  int&lt;lower=1&gt; N_groups;
+  int&lt;lower=1,upper=N_groups&gt; groups[N];
+  int&lt;lower=0&gt; y[N];
+}
+
+parameters {
+  real intercept;
+  vector[N_groups] group_z; 
+  real&lt;lower=0&gt; group_sd;
+}
+
+transformed parameters {
+  vector[N_groups] group_r = group_z * group_sd;
+}
+
+model {
+  intercept ~ normal(3,1);
+  group_z ~ std_normal();
+  group_sd ~ normal(0, 1);
+  y ~ poisson_log(intercept + group_r[groups]);
+}
+
+&quot;
+
+model_nc &lt;- cmdstan_model(write_stan_file(model_code_nc))</code></pre>
+<pre class="r"><code>fit_nc &lt;- model_nc$sample(data = data_stan, refresh = 0)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 1 finished in 1.5 seconds.
+## Chain 2 finished in 1.4 seconds.</code></pre>
+<pre><code>## Warning: Chain 4 finished unexpectedly!</code></pre>
+<pre><code>## Chain 3 finished in 1.6 seconds.
+## Chain 4 finished in 1.5 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.5 seconds.
+## Total execution time: 2.4 seconds.</code></pre>
+<pre class="r"><code>fit_nc$summary()</code></pre>
+<pre><code>## # A tibble: 43 x 10
+##    variable       mean   median    sd   mad       q5       q95  rhat ess_bulk
+##    &lt;chr&gt;         &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__       3018.    3019.    4.43  4.33  3011.    3025.      1.01     744.
+##  2 intercept     3.10     3.10  0.187 0.177    2.79     3.41    1.01     530.
+##  3 group_z[1]   -1.89    -1.87  0.484 0.479   -2.73    -1.12    1.00    1235.
+##  4 group_z[2]   -0.575   -0.567 0.327 0.338   -1.12    -0.0575  1.00     958.
+##  5 group_z[3]   -0.383   -0.372 0.321 0.314   -0.922    0.122   1.00     920.
+##  6 group_z[4]   -0.570   -0.555 0.331 0.327   -1.13    -0.0425  1.01    1003.
+##  7 group_z[5]   -0.615   -0.604 0.335 0.325   -1.19    -0.0921  1.01     978.
+##  8 group_z[6]    0.609    0.604 0.283 0.277    0.144    1.09    1.01     663.
+##  9 group_z[7]   -0.758   -0.741 0.359 0.351   -1.35    -0.186   1.00    1076.
+## 10 group_z[8]    1.47     1.46  0.342 0.353    0.917    2.02    1.01     575.
+## # ... with 33 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_nc$draws(), pars = my_pars(&quot;group_z&quot;, N_groups), transformations = my_transformations, np = nuts_params(fit_nc))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+</div>
+<div id="centered" class="section level2">
+<h2>Centered</h2>
+<pre class="r"><code>model_code_c &lt;- &quot;
+data {
+  int&lt;lower=0&gt; N;
+  int&lt;lower=1&gt; N_groups;
+  int&lt;lower=1,upper=N_groups&gt; groups[N];
+  int&lt;lower=0&gt; y[N];
+}
+
+parameters {
+  real intercept;
+  vector[N_groups] group_r; 
+  real&lt;lower=0&gt; group_sd;
+}
+
+model {
+  intercept ~ normal(3,1);
+  group_r ~ normal(0, group_sd);
+  group_sd ~ normal(0, 1);
+  y ~ poisson_log(intercept + group_r[groups]);
+}
+
+&quot;
+
+model_c &lt;- cmdstan_model(write_stan_file(model_code_c))</code></pre>
+<pre class="r"><code>fit_c &lt;- model_c$sample(data = data_stan, refresh = 0)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 1 finished in 0.9 seconds.
+## Chain 3 finished in 0.9 seconds.
+## Chain 2 finished in 1.0 seconds.
+## Chain 4 finished in 1.1 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.0 seconds.
+## Total execution time: 2.0 seconds.</code></pre>
+<pre class="r"><code>fit_c$summary()</code></pre>
+<pre><code>## # A tibble: 23 x 10
+##    variable       mean   median    sd   mad       q5       q95  rhat ess_bulk
+##    &lt;chr&gt;         &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__       3023.    3024.    3.33  3.19  3017.    3028.      1.00    1639.
+##  2 intercept     3.07     3.07  0.187 0.173    2.74     3.38    1.01     265.
+##  3 group_r[1]   -1.46    -1.46  0.335 0.329   -2.04    -0.933   1.00     851.
+##  4 group_r[2]   -0.425   -0.420 0.253 0.252   -0.842   -0.0212  1.00     494.
+##  5 group_r[3]   -0.266   -0.261 0.242 0.240   -0.684    0.124   1.01     506.
+##  6 group_r[4]   -0.422   -0.422 0.252 0.248   -0.842   -0.0100  1.00     472.
+##  7 group_r[5]   -0.455   -0.457 0.261 0.257   -0.895   -0.0258  1.00     495.
+##  8 group_r[6]    0.508    0.507 0.219 0.210    0.139    0.881   1.01     340.
+##  9 group_r[7]   -0.564   -0.562 0.260 0.263   -0.997   -0.150   1.00     546.
+## 10 group_r[8]    1.17     1.17  0.203 0.194    0.845    1.52    1.01     309.
+## # ... with 13 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_c$draws(), pars = my_pars(&quot;group_r&quot;, N_groups), transformations = my_transformations, np = nuts_params(fit_c))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+</div>
+<div id="centered---sum-to-zero" class="section level2">
+<h2>Centered - sum to zero</h2>
+<pre class="r"><code>model_code_c_sz &lt;- &quot;
+functions {
+  vector Q_sum_to_zero_QR(int N) {
+    vector [2*N] Q_r;
+
+    for(i in 1:N) {
+      Q_r[i] = -sqrt((N-i)/(N-i+1.0));
+      Q_r[i+N] = inv_sqrt((N-i) * (N-i+1));
+    }
+    Q_r = Q_r * inv_sqrt(1 - inv(N));
+    return Q_r;
+  }
+
+  vector sum_to_zero_QR(vector x_raw, vector Q_r) {
+    int N = num_elements(x_raw) + 1;
+    vector [N] x;
+    real x_aux = 0;
+
+    for(i in 1:N-1){
+      x[i] = x_aux + x_raw[i] * Q_r[i];
+      x_aux = x_aux + x_raw[i] * Q_r[i+N];
+    }
+    x[N] = x_aux;
+    return x;
+  }
+}
+
+data {
+  int&lt;lower=0&gt; N;
+  int&lt;lower=1&gt; N_groups;
+  int&lt;lower=1,upper=N_groups&gt; groups[N];
+  int&lt;lower=0&gt; y[N];
+}
+
+transformed data {
+  vector[2 * N_groups] groups_Q_r = Q_sum_to_zero_QR(N_groups);
+}
+
+parameters {
+  real intercept;
+  vector[N_groups - 1] group_r_raw; 
+  real&lt;lower=0&gt; group_sd;
+}
+
+transformed parameters {
+  vector[N_groups] group_r = sum_to_zero_QR(group_r_raw, groups_Q_r);
+}
+
+model {
+  intercept ~ normal(3,1);
+  group_r_raw ~ normal(0, group_sd);
+  group_sd ~ normal(0, 1);
+  y ~ poisson_log(intercept + group_r[groups]);
+}
+
+&quot;
+
+model_c_sz &lt;- cmdstan_model(write_stan_file(model_code_c_sz))</code></pre>
+<pre class="r"><code>fit_c_sz &lt;- model_c_sz$sample(data = data_stan, refresh = 0)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...</code></pre>
+<pre><code>## Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 4 Exception: normal_lpdf: Scale parameter is 0, but must be positive! (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpQ9CUmz/model-9d05bfa67ab.stan&#39;, line 51, column 2 to column 36)</code></pre>
+<pre><code>## Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 4</code></pre>
+<pre><code>## Chain 1 finished in 0.7 seconds.
+## Chain 2 finished in 0.7 seconds.
+## Chain 3 finished in 0.7 seconds.
+## Chain 4 finished in 0.7 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.7 seconds.
+## Total execution time: 1.4 seconds.</code></pre>
+<pre class="r"><code>fit_c_sz$summary()</code></pre>
+<pre><code>## # A tibble: 42 x 10
+##    variable         mean   median     sd    mad       q5      q95  rhat ess_bulk
+##    &lt;chr&gt;           &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__         3024.    3024.    3.24   3.23   3018.     3.03e+3  1.00    1895.
+##  2 intercept       3.09     3.09  0.0386 0.0391    3.02   3.15e+0  1.00    3984.
+##  3 group_r_raw~    1.48     1.46  0.287  0.282     1.03   1.97e+0  1.00    5842.
+##  4 group_r_raw~    0.518    0.514 0.181  0.177     0.225  8.23e-1  1.00    7124.
+##  5 group_r_raw~    0.392    0.387 0.160  0.160     0.136  6.60e-1  1.00    6656.
+##  6 group_r_raw~    0.568    0.566 0.179  0.172     0.278  8.68e-1  1.00    7488.
+##  7 group_r_raw~    0.645    0.644 0.178  0.179     0.367  9.44e-1  1.00    6985.
+##  8 group_r_raw~   -0.283   -0.286 0.119  0.118    -0.475 -8.66e-2  1.00    5840.
+##  9 group_r_raw~    0.775    0.768 0.188  0.186     0.479  1.10e+0  1.00    7328.
+## 10 group_r_raw~   -0.923   -0.924 0.0874 0.0858   -1.07  -7.79e-1  1.00    5389.
+## # ... with 32 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_c_sz$draws(), pars = my_pars(&quot;group_r_raw&quot;, N_groups - 1), transformations = my_transformations, np = nuts_params(fit_c_sz))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+</div>
+<div id="non-centered---sum-to-zero" class="section level2">
+<h2>Non-centered - sum to zero</h2>
+<pre class="r"><code>model_code_nc_sz &lt;- &quot;
+functions {
+  vector Q_sum_to_zero_QR(int N) {
+    vector [2*N] Q_r;
+
+    for(i in 1:N) {
+      Q_r[i] = -sqrt((N-i)/(N-i+1.0));
+      Q_r[i+N] = inv_sqrt((N-i) * (N-i+1));
+    }
+    Q_r = Q_r * inv_sqrt(1 - inv(N));
+    return Q_r;
+  }
+
+  vector sum_to_zero_QR(vector x_raw, vector Q_r) {
+    int N = num_elements(x_raw) + 1;
+    vector [N] x;
+    real x_aux = 0;
+
+    for(i in 1:N-1){
+      x[i] = x_aux + x_raw[i] * Q_r[i];
+      x_aux = x_aux + x_raw[i] * Q_r[i+N];
+    }
+    x[N] = x_aux;
+    return x;
+  }
+}
+
+data {
+  int&lt;lower=0&gt; N;
+  int&lt;lower=1&gt; N_groups;
+  int&lt;lower=1,upper=N_groups&gt; groups[N];
+  int&lt;lower=0&gt; y[N];
+}
+
+transformed data {
+  vector[2 * N_groups] groups_Q_r = Q_sum_to_zero_QR(N_groups);
+}
+
+parameters {
+  real intercept;
+  vector[N_groups - 1] group_r_raw; 
+  real&lt;lower=0&gt; group_sd;
+}
+
+transformed parameters {
+  vector[N_groups] group_r = sum_to_zero_QR(group_r_raw, groups_Q_r) * group_sd;
+}
+
+model {
+  intercept ~ normal(3,1);
+  group_r_raw ~ normal(0, 1);
+  group_sd ~ normal(0, 1);
+  y ~ poisson_log(intercept + group_r[groups]);
+}
+
+&quot;
+
+model_nc_sz &lt;- cmdstan_model(write_stan_file(model_code_nc_sz))</code></pre>
+<pre class="r"><code>fit_nc_sz &lt;- model_nc_sz$sample(data = data_stan)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 1 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 1 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 1 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 1 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 1 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 1 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 1 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 2 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 2 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 2 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 2 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 2 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 2 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 3 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 3 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 3 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 3 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 3 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 3 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 3 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 4 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 4 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 4 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 4 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 4 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 1 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 1 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 1 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 1 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 2 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 2 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 2 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 2 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 2 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 3 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 3 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 3 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 3 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 4 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 4 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 4 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 4 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 4 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 4 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 1 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 1 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 2 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 2 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 3 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 3 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 4 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 4 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 1 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 2 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 3 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 4 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 1 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 2 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 3 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 3 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 4 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 4 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 1 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 2 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 3 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 4 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 1 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 2 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 2 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 3 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 4 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 3 finished in 1.8 seconds.
+## Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 4 finished in 1.8 seconds.
+## Chain 1 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 1 finished in 1.9 seconds.
+## Chain 2 finished in 1.9 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.8 seconds.
+## Total execution time: 2.7 seconds.</code></pre>
+<pre class="r"><code>fit_nc_sz$summary()</code></pre>
+<pre><code>## # A tibble: 42 x 10
+##    variable         mean   median     sd    mad       q5      q95  rhat ess_bulk
+##    &lt;chr&gt;           &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__         3019.    3019.    4.39   4.37   3011.    3025.     1.01     694.
+##  2 intercept       3.09     3.09  0.0387 0.0387    3.02     3.15   1.00    3524.
+##  3 group_r_raw~    1.94     1.91  0.437  0.432     1.27     2.72   1.00    1472.
+##  4 group_r_raw~    0.684    0.663 0.262  0.249     0.283    1.15   1.00    2059.
+##  5 group_r_raw~    0.528    0.508 0.243  0.235     0.154    0.944  1.00    2863.
+##  6 group_r_raw~    0.757    0.734 0.271  0.265     0.358    1.24   1.00    2167.
+##  7 group_r_raw~    0.849    0.829 0.266  0.258     0.444    1.32   1.00    1606.
+##  8 group_r_raw~   -0.380   -0.371 0.161  0.157    -0.660   -0.128  1.00    2304.
+##  9 group_r_raw~    1.03     1.00  0.300  0.299     0.588    1.57   1.00    1670.
+## 10 group_r_raw~   -1.22    -1.21  0.230  0.228    -1.63    -0.873  1.00     675.
+## # ... with 32 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_nc_sz$draws(), pars = my_pars(&quot;group_r_raw&quot;, N_groups - 1), transformations = my_transformations, np = nuts_params(fit_nc_sz))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+</div>
+<div id="sufficient-statistics-centered" class="section level2">
+<h2>Sufficient statistics, centered</h2>
+<pre class="r"><code>model_suff_c &lt;- cmdstan_model(&quot;intercept_suff_centered.stan&quot;)</code></pre>
+<pre class="r"><code>fit_suff_c &lt;- model_suff_c$sample(data = data_stan, refresh = 0)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...</code></pre>
+<pre><code>## Chain 1 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 1 Exception: multi_normal_lpdf: Covariance matrix is not symmetric. Covariance matrix[1,2] = 2.68435e+08, but Covariance matrix[2,1] = -2.68435e+08 (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 1 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 1 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 1</code></pre>
+<pre><code>## Chain 1 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 1 Exception: multi_normal_lpdf: Covariance matrix is not symmetric. Covariance matrix[1,2] = nan, but Covariance matrix[2,1] = nan (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 1 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 1 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 1</code></pre>
+<pre><code>## Chain 2 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 2 Exception: multi_normal_lpdf: LDLT_Factor of covariance parameter is not positive definite.  last conditional variance is 0. (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 2 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 2 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 2</code></pre>
+<pre><code>## Chain 3 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 3 Exception: multi_normal_lpdf: Covariance matrix is not symmetric. Covariance matrix[1,2] = nan, but Covariance matrix[2,1] = nan (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 3 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 3 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 3</code></pre>
+<pre><code>## Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 4 Exception: multi_normal_lpdf: Covariance matrix is not symmetric. Covariance matrix[1,2] = -2.09521e+52, but Covariance matrix[2,1] = -2.69384e+52 (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 4</code></pre>
+<pre><code>## Chain 4 Informational Message: The current Metropolis proposal is about to be rejected because of the following issue:</code></pre>
+<pre><code>## Chain 4 Exception: multi_normal_lpdf: Covariance matrix is not symmetric. Covariance matrix[1,2] = nan, but Covariance matrix[2,1] = nan (in &#39;C:/Users/Martin/AppData/Local/Temp/RtmpiiAOb1/model-34103f854bd.stan&#39;, line 67, column 2 to line 69, column 44)</code></pre>
+<pre><code>## Chain 4 If this warning occurs sporadically, such as for highly constrained variable types like covariance matrices, then the sampler is fine,</code></pre>
+<pre><code>## Chain 4 but if this warning occurs often then your model may be either severely ill-conditioned or misspecified.</code></pre>
+<pre><code>## Chain 4</code></pre>
+<pre><code>## Chain 1 finished in 3.0 seconds.</code></pre>
+<pre><code>## Warning: Chain 4 finished unexpectedly!</code></pre>
+<pre><code>## Chain 2 finished in 3.1 seconds.
+## Chain 3 finished in 3.1 seconds.
+## Chain 4 finished in 3.0 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 3.1 seconds.
+## Total execution time: 3.6 seconds.</code></pre>
+<pre class="r"><code>fit_suff_c$summary()</code></pre>
+<pre><code>## # A tibble: 66 x 10
+##    variable         mean   median     sd    mad       q5      q95  rhat ess_bulk
+##    &lt;chr&gt;           &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__         -141.    -141.    3.24   3.11   -147.    -1.36e+2  1.00    1769.
+##  2 intercept_s~    3.09     3.09  0.0391 0.0394    3.02   3.15e+0  1.00    3766.
+##  3 group_r_raw~    1.48     1.47  0.285  0.284     1.04   1.97e+0  1.00    5739.
+##  4 group_r_raw~    0.521    0.515 0.179  0.176     0.238  8.26e-1  1.00    7103.
+##  5 group_r_raw~    0.395    0.388 0.165  0.170     0.130  6.70e-1  1.00    6942.
+##  6 group_r_raw~    0.572    0.568 0.178  0.175     0.284  8.75e-1  1.00    7288.
+##  7 group_r_raw~    0.646    0.642 0.178  0.178     0.371  9.43e-1  1.00    7153.
+##  8 group_r_raw~   -0.286   -0.287 0.116  0.117    -0.473 -9.18e-2  1.00    6758.
+##  9 group_r_raw~    0.784    0.775 0.195  0.200     0.479  1.12e+0  1.00    7534.
+## 10 group_r_raw~   -0.921   -0.921 0.0875 0.0889   -1.06  -7.77e-1  1.00    5578.
+## # ... with 56 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_suff_c$draws(), pars = c(&quot;group_sd&quot;, &quot;intercept_sweep&quot;, paste0(&quot;group_r_raw[&quot;, c(1, 2, N_groups - 1), &quot;]&quot;)), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+<pre class="r"><code># mcmc_pairs(fit_suff_c$draws(), pars = c(&quot;group_sd&quot;, &quot;intercept_sweep&quot;, paste0(&quot;group_r_raw[&quot;, c(1), &quot;]&quot;), &quot;mean_group_r_raw&quot;), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_suff_c$draws(), regex_pars = c(&quot;m_R&quot;, &quot;sigma_R&quot;))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<div id="sbc-test" class="section level3">
+<h3>SBC test</h3>
+<pre class="r"><code>library(SBC)
+library(future)
+plan(multisession)
+options(SBC.min_chunk_size = 5)
+
+SBC_cache_dir &lt;- &quot;_intercept-correlations-sbc-cache&quot;
+if(!dir.exists(SBC_cache_dir)) {
+  dir.create(SBC_cache_dir)
+}</code></pre>
+<pre class="r"><code>generator &lt;- function(N, N_groups) {
+
+  groups &lt;- rep(1:N_groups, length.out = N)
+
+  intercept &lt;- rnorm(1, mean = 3, sd = 1) 
+  group_sd &lt;- abs(rnorm(1))
+  group_r &lt;- rnorm(N_groups, sd = group_sd)
+
+  mu &lt;- intercept + group_r[groups]
+  y &lt;- rpois(N, exp(mu))
+
+  list(parameters = list(
+    intercept = intercept,
+    group_sd = group_sd,
+    group_r = group_r
+  ),
+       generated = list(N = N,
+                    N_groups = N_groups,
+                    groups = groups,
+                    y = y)
+  )
+}
+
+set.seed(5465524)
+
+generator_c &lt;- SBC_generator_function(generator, N = 50, N_groups = 3)
+datasets_c &lt;- generate_datasets(generator_c, n_datasets = 500)</code></pre>
+<pre><code>## Warning in generate_datasets.SBC_generator_function(generator_c, n_datasets =
+## 500): n_datasets argument is deprecated, use n_sims instead</code></pre>
+<pre><code>## Warning in generate_datasets.SBC_generator_function(generator_c, n_datasets
+## = 500): Generator function returns a list with element `parameters`, which is
+## deprecated. Return `variables` instead.</code></pre>
+<pre class="r"><code>suff_c_backend &lt;- SBC_backend_cmdstan_sample(model_suff_c, chains = 2)
+SBC_res_suff_c &lt;- compute_results(datasets_c, suff_c_backend, 
+                                  gen_quants = generated_quantities(
+                                    mu_r = mean(group_r),
+                                    group_r_c = group_r - mean(group_r),
+                                    intercept_c = intercept + mean(group_r),
+                                    sd_c = sd(group_r),
+                                    log_lik = sum(dpois(y, exp(intercept + group_r[groups]), log = TRUE))),
+                                  keep_fits = FALSE,
+                                  cache_mode = &quot;results&quot;,
+                                  cache_location = file.path(SBC_cache_dir, &quot;suff_c_datasets_c.rds&quot;))</code></pre>
+<pre><code>## Warning in compute_results(datasets_c, suff_c_backend, gen_quants =
+## generated_quantities(mu_r = mean(group_r), : compute_results() is deprecated,
+## use compute_SBC instead.</code></pre>
+<pre><code>## Cache file exists but the backend hash differs. Will recompute.</code></pre>
+<pre><code>##  - 26 (5%) fits had at least one Rhat &gt; 1.01. Largest Rhat was 1.471.</code></pre>
+<pre><code>##  - 25 (5%) fits had tail ESS undefined or less than half of the maximum rank, potentially skewing 
+## the rank statistics. The lowest tail ESS was 3.
+##  If the fits look good otherwise, increasing `thin_ranks` (via recompute_SBC_statistics) 
+## or number of posterior draws (by refitting) might help.</code></pre>
+<pre><code>##  - 177 (35%) fits had divergent transitions. Maximum number of divergences was 433.</code></pre>
+<pre><code>##  - 391 (78%) fits had some steps rejected. Maximum number of rejections was 3.</code></pre>
+<pre><code>## Not all diagnostics are OK.
+## You can learn more by inspecting $default_diagnostics, $backend_diagnostics 
+## and/or investigating $outputs/$messages/$warnings for detailed output from the backend.</code></pre>
+<pre class="r"><code>SBC_res_suff_c$backend_diagnostics</code></pre>
+<pre><code>##     sim_id max_chain_time n_failed_chains n_divergent n_max_treedepth n_rejects
+## 1        1          0.780               0           0               0         0
+## 2        2          1.050               0           0               0         2
+## 3        3          1.474               0         108               0         1
+## 4        4          1.546               0           0               0         1
+## 5        5          1.452               0           0               0         0
+## 6        6          1.552               0           0               0         2
+## 7        7          1.700               0           0               0         1
+## 8        8          1.772               0           0               0         1
+## 9        9          1.658               0           0               0         1
+## 10      10          1.482               0           0               0         2
+## 11      11          1.410               0           0               0         2
+## 12      12          1.611               0           0               0         2
+## 13      13          4.174               0           0               0         1
+## 14      14          1.607               0           0               0         1
+## 15      15          1.361               0           1               0         1
+## 16      16          1.919               0           0               0         1
+## 17      17          1.790               0           1               0         1
+## 18      18          2.015               0           0               0         1
+## 19      19          1.761               0           0               0         2
+## 20      20          1.383               0           0               0         2
+## 21      21          1.565               0           3               0         2
+## 22      22          1.312               0           2               0         1
+## 23      23          1.784               0           7               0         0
+## 24      24          1.972               0           0               0         2
+## 25      25          1.112               0           1               0         0
+## 26      26          2.913               0           0               0         1
+## 27      27          1.253               0           0               0         1
+## 28      28          1.935               0           0               0         1
+## 29      29          1.438               0           2               0         2
+## 30      30          2.001               0          84               0         2
+## 31      31          1.507               0           0               0         1
+## 32      32          1.372               0           0               0         1
+## 33      33          1.622               0           0               0         2
+## 34      34          1.173               0           0               0         0
+## 35      35          1.026               0           0               0         2
+## 36      36          1.338               0           0               0         0
+## 37      37          1.123               0           0               0         1
+## 38      38          0.954               0           0               0         1
+## 39      39          1.093               0           0               0         1
+## 40      40          1.159               0           0               0         1
+## 41      41          1.057               0           0               0         2
+## 42      42          1.159               0           0               0         2
+## 43      43          1.067               0           0               0         0
+## 44      44          1.274               0           0               0         1
+## 45      45          1.309               0           0               0         1
+## 46      46          1.897               0          52               0         0
+## 47      47          1.492               0           3               0         2
+## 48      48          1.803               0           0               0         2
+## 49      49          1.491               0           0               0         0
+## 50      50          2.573               0          58               0         1
+## 51      51          1.357               0           0               0         1
+## 52      52          1.239               0           0               0         2
+## 53      53          1.239               0           0               0         0
+## 54      54          1.579               0           0               0         1
+## 55      55          1.794               0           0               0         1
+## 56      56          1.495               0           0               0         0
+## 57      57          2.109               0           0               0         1
+## 58      58          1.300               0           0               0         1
+## 59      59          1.349               0           0               0         3
+## 60      60          2.025               0          55               0         0
+## 61      61          1.548               0           0               0         1
+## 62      62          2.059               0           3               0         1
+## 63      63          1.764               0          28               0         1
+## 64      64          1.554               0           0               0         0
+## 65      65          1.714               0           0               0         2
+## 66      66          2.316               0          64               0         0
+## 67      67          1.581               0          15               0         1
+## 68      68          1.611               0           0               0         0
+## 69      69          1.907               0           0               0         1
+## 70      70          2.211               0           0               0         1
+## 71      71          1.650               0           1               0         0
+## 72      72          1.737               0           0               0         2
+## 73      73          1.658               0           0               0         2
+## 74      74          1.422               0           0               0         1
+## 75      75          1.844               0           0               0         0
+## 76      76          0.824               0           3               0         2
+## 77      77          0.894               0           1               0         1
+## 78      78          1.394               0          85               0         1
+## 79      79          0.827               0           1               0         0
+## 80      80          1.123               0           0               0         1
+## 81      81          0.820               0           0               0         1
+## 82      82          0.879               0           0               0         1
+## 83      83          0.827               0           0               0         1
+## 84      84          0.815               0           2               0         2
+## 85      85          2.258               0          28               0         0
+## 86      86          1.618               0           0               0         1
+## 87      87          1.650               0           1               0         0
+## 88      88          1.608               0           0               0         1
+## 89      89          1.951               0           0               0         1
+## 90      90          2.419               0         128               0         1
+## 91      91          2.787               0          90               0         0
+## 92      92          1.564               0           4               0         1
+## 93      93          1.337               0           0               0         2
+## 94      94          2.561               0          56               0         1
+## 95      95          1.452               0           0               0         1
+## 96      96          1.429               0           1               0         0
+## 97      97          1.855               0           0               0         0
+## 98      98          1.432               0           0               0         2
+## 99      99          2.323               0           0               0         1
+## 100    100          1.685               0           0               0         0
+## 101    101          1.764               0           0               0         0
+## 102    102          2.061               0          30               0         2
+## 103    103          1.901               0           0               0         1
+## 104    104          1.316               0           0               0         0
+## 105    105          1.696               0          19               0         2
+## 106    106          1.574               0           0               0         2
+## 107    107          1.806               0           0               0         1
+## 108    108          1.657               0           0               0         1
+## 109    109          1.664               0           0               0         1
+## 110    110          1.588               0           0               0         1
+## 111    111          1.900               0           0               0         2
+## 112    112          1.812               0           2               0         0
+## 113    113          1.304               0           0               0         1
+## 114    114          1.452               0           3               0         1
+## 115    115          1.292               0           0               0         0
+## 116    116          0.892               0           0               0         0
+## 117    117          0.816               0           0               0         1
+## 118    118          1.275               0          21               0         1
+## 119    119          1.000               0           0               0         2
+## 120    120          1.391               0           0               0         1
+## 121    121          0.915               0           0               0         0
+## 122    122          0.857               0           0               0         1
+## 123    123          2.079               0           0               0         2
+## 124    124          0.873               0          48               0         1
+## 125    125          0.803               0           0               0         1
+## 126    126          1.156               0           1               0         0
+## 127    127          9.121               0           0               0         2
+## 128    128          2.113               0          23               0         1
+## 129    129          1.532               0          22               0         0
+## 130    130          1.461               0           1               0         1
+## 131    131          1.801               0          73               0         2
+## 132    132          1.519               0           5               0         0
+## 133    133          1.740               0           0               0         3
+## 134    134          1.763               0           8               0         0
+## 135    135          1.639               0           0               0         1
+## 136    136          6.659               0           0               0         1
+## 137    137          2.385               0          79               0         0
+## 138    138          1.382               0           0               0         1
+## 139    139          1.912               0           0               0         1
+## 140    140          2.407               0           0               0         2
+## 141    141          1.589               0           0               0         0
+## 142    142          1.809               0           7               0         1
+## 143    143          1.568               0           0               0         1
+## 144    144          1.439               0           0               0         0
+## 145    145          2.311               0           0               0         2
+## 146    146          1.396               0           0               0         1
+## 147    147          2.190               0           0               0         2
+## 148    148          4.577               0           0               0         2
+## 149    149          1.713               0           1               0         0
+## 150    150          1.894               0           0               0         2
+## 151    151          1.648               0           0               0         2
+## 152    152          1.570               0           0               0         1
+## 153    153          1.335               0           0               0         0
+## 154    154          1.265               0           2               0         1
+## 155    155          2.133               0           0               0         2
+## 156    156          0.963               0           0               0         2
+## 157    157          0.896               0           0               0         1
+## 158    158          1.096               0           0               0         2
+## 159    159          0.988               0           1               0         2
+## 160    160          1.541               0           0               0         1
+## 161    161          0.768               0           1               0         1
+## 162    162          0.899               0           2               0         0
+## 163    163          1.033               0           5               0         2
+## 164    164          0.637               0           0               0         0
+## 165    165          0.970               0          32               0         2
+## 166    166          0.933               0           7               0         1
+## 167    167          0.712               0           2               0         2
+## 168    168          1.338               0           0               0         2
+## 169    169          1.304               0           0               0         0
+## 170    170          1.494               0           0               0         2
+## 171    171          1.891               0           0               0         0
+## 172    172          1.750               0           0               0         1
+## 173    173          4.147               0           0               0         3
+## 174    174          1.506               0          16               0         1
+## 175    175          1.747               0           0               0         1
+## 176    176          1.369               0           5               0         1
+## 177    177          1.458               0           0               0         1
+## 178    178          1.640               0           1               0         3
+## 179    179          1.676               0           0               0         1
+## 180    180          1.652               0           1               0         2
+## 181    181          1.968               0           3               0         1
+## 182    182          1.835               0           0               0         2
+## 183    183          1.756               0           0               0         1
+## 184    184          1.971               0           0               0         0
+## 185    185          1.439               0           2               0         2
+## 186    186          1.444               0           1               0         0
+## 187    187          1.302               0           3               0         1
+## 188    188          1.898               0           4               0         1
+## 189    189          2.018               0           1               0         1
+## 190    190          1.552               0           1               0         1
+## 191    191          2.174               0          65               0         0
+## 192    192          1.717               0           0               0         0
+## 193    193          1.465               0           0               0         2
+## 194    194          1.945               0          15               0         0
+## 195    195          1.757               0           0               0         1
+## 196    196          1.198               0           0               0         2
+## 197    197          1.650               0          25               0         2
+## 198    198          1.534               0           0               0         1
+## 199    199          1.502               0           0               0         2
+## 200    200          0.854               0           0               0         1
+## 201    201          1.494               0           0               0         2
+## 202    202          1.302               0           0               0         1
+## 203    203          0.954               0           4               0         2
+## 204    204          1.170               0           0               0         2
+## 205    205          1.016               0           0               0         2
+## 206    206          0.983               0           0               0         2
+## 207    207          0.814               0           0               0         1
+## 208    208          0.741               0           0               0         1
+## 209    209          1.505               0           0               0         2
+## 210    210          1.476               0           0               0         0
+## 211    211          1.586               0           0               0         2
+## 212    212          2.411               0           0               0         3
+## 213    213          1.170               0           0               0         1
+## 214    214          2.048               0         131               0         2
+## 215    215          1.484               0           0               0         2
+## 216    216          2.331               0           0               0         1
+## 217    217          2.488               0           0               0         3
+## 218    218          1.657               0           4               0         1
+## 219    219          1.370               0           0               0         0
+## 220    220          1.554               0           2               0         1
+## 221    221          1.860               0         433               0         1
+## 222    222          1.507               0           0               0         2
+## 223    223          2.168               0          71               0         2
+## 224    224          1.406               0           0               0         2
+## 225    225          1.510               0          52               0         0
+## 226    226          2.126               0           0               0         2
+## 227    227          1.515               0           0               0         2
+## 228    228          1.447               0           0               0         1
+## 229    229          1.970               0           0               0         1
+## 230    230          3.259               0           0               0         1
+## 231    231          1.374               0          10               0         0
+## 232    232          1.274               0           0               0         0
+## 233    233          1.413               0           0               0         0
+## 234    234          1.616               0           2               0         2
+## 235    235          1.339               0           1               0         1
+## 236    236          1.296               0           0               0         2
+## 237    237          1.479               0           0               0         0
+## 238    238          2.736               0           0               0         0
+## 239    239          0.941               0          33               0         1
+## 240    240          1.370               0          75               0         0
+## 241    241          1.311               0           0               0         2
+## 242    242          1.045               0           0               0         1
+## 243    243          0.948               0           0               0         1
+## 244    244          1.294               0          42               0         3
+## 245    245          1.365               0           0               0         1
+## 246    246          0.921               0           0               0         0
+## 247    247          1.028               0           0               0         1
+## 248    248          0.878               0           1               0         0
+## 249    249          0.722               0           0               0         1
+## 250    250          0.806               0           0               0         1
+## 251    251          1.250               0           1               0         1
+## 252    252          1.410               0           0               0         0
+## 253    253          1.482               0           8               0         1
+## 254    254          1.973               0          26               0         2
+## 255    255          2.183               0           0               0         3
+## 256    256          1.371               0           0               0         0
+## 257    257          1.511               0           0               0         1
+## 258    258          1.659               0           0               0         1
+## 259    259          1.569               0           0               0         1
+## 260    260          1.590               0           0               0         1
+## 261    261          1.384               0           3               0         1
+## 262    262          1.682               0           0               0         2
+## 263    263          1.491               0           0               0         1
+## 264    264          1.827               0           0               0         2
+## 265    265          2.387               0           0               0         1
+## 266    266          1.786               0           0               0         2
+## 267    267          1.620               0           2               0         0
+## 268    268          2.424               0           0               0         0
+## 269    269          1.691               0           0               0         0
+## 270    270          1.677               0          80               0         1
+## 271    271          1.934               0           0               0         0
+## 272    272          1.455               0           1               0         2
+## 273    273          1.780               0           1               0         1
+## 274    274          3.484               0           0               0         3
+## 275    275          1.415               0           6               0         1
+## 276    276          1.648               0           5               0         0
+## 277    277          1.824               0           1               0         0
+## 278    278          2.510               0          76               0         2
+## 279    279          1.894               0           0               0         1
+## 280    280          2.731               0           0               0         1
+## 281    281          1.012               0           0               0         1
+## 282    282          1.026               0           1               0         0
+## 283    283          1.027               0           1               0         1
+## 284    284          1.101               0           0               0         1
+## 285    285          1.345               0           0               0         2
+## 286    286          1.302               0          68               0         1
+## 287    287          0.858               0           0               0         1
+## 288    288          0.834               0           0               0         2
+## 289    289          1.007               0           0               0         2
+## 290    290          1.012               0          50               0         1
+## 291    291          0.755               0           0               0         2
+## 292    292          0.628               0           0               0         1
+## 293    293          1.839               0           0               0         2
+## 294    294          1.263               0           0               0         0
+## 295    295          1.344               0           0               0         1
+## 296    296          2.540               0           0               0         0
+## 297    297          1.534               0           0               0         2
+## 298    298          2.031               0         194               0         1
+## 299    299          2.039               0          32               0         2
+## 300    300          1.565               0           0               0         0
+## 301    301          1.603               0           0               0         1
+## 302    302          4.496               0           0               0         1
+## 303    303          1.380               0           0               0         1
+## 304    304          1.706               0          13               0         2
+## 305    305          1.605               0           0               0         2
+## 306    306          1.719               0           0               0         2
+## 307    307          1.549               0           0               0         2
+## 308    308          1.840               0          32               0         2
+## 309    309          1.692               0           2               0         2
+## 310    310          1.995               0          75               0         0
+## 311    311          1.365               0           7               0         1
+## 312    312          2.640               0          15               0         1
+## 313    313          1.600               0           0               0         2
+## 314    314          1.702               0           0               0         1
+## 315    315          1.933               0           0               0         2
+## 316    316          1.575               0           0               0         1
+## 317    317          2.162               0           0               0         2
+## 318    318          1.704               0          35               0         0
+## 319    319          1.497               0           0               0         1
+## 320    320          1.590               0           0               0         1
+## 321    321          1.473               0           0               0         1
+## 322    322          0.901               0           0               0         1
+## 323    323          2.935               0           0               0         1
+## 324    324          0.731               0           0               0         2
+## 325    325          3.110               0           0               0         2
+## 326    326          1.057               0           0               0         1
+## 327    327          1.542               0           0               0         1
+## 328    328          0.936               0           0               0         1
+## 329    329          0.825               0           0               0         1
+## 330    330          0.949               0           0               0         0
+## 331    331          1.035               0           0               0         0
+## 332    332          0.775               0           0               0         2
+## 333    333          0.656               0           0               0         1
+## 334    334          2.088               0          61               0         1
+## 335    335          1.846               0           0               0         2
+## 336    336          1.613               0           0               0         1
+## 337    337          1.686               0          59               0         1
+## 338    338          2.255               0           0               0         2
+## 339    339          1.465               0           7               0         1
+## 340    340          1.592               0          94               0         0
+## 341    341          1.482               0           3               0         1
+## 342    342          1.539               0           0               0         1
+## 343    343          2.065               0          75               0         0
+## 344    344          1.516               0           0               0         1
+## 345    345          2.362               0         230               0         2
+## 346    346          1.560               0           0               0         1
+## 347    347          2.405               0           0               0         1
+## 348    348          1.975               0          23               0         2
+## 349    349          1.588               0           4               0         1
+## 350    350          1.301               0           0               0         1
+## 351    351          1.455               0           0               0         1
+## 352    352          2.361               0           0               0         2
+## 353    353          2.014               0         395               0         2
+## 354    354          1.805               0         127               0         0
+## 355    355          1.620               0           0               0         0
+## 356    356          1.567               0           0               0         1
+## 357    357          1.341               0           2               0         1
+## 358    358          1.533               0           0               0         2
+## 359    359          1.478               0           1               0         1
+## 360    360          1.460               0           0               0         2
+## 361    361          1.908               0           0               0         2
+## 362    362          1.167               0           0               0         1
+## 363    363          0.822               0           0               0         0
+## 364    364          1.263               0          51               0         1
+## 365    365          1.032               0           0               0         2
+## 366    366          1.178               0           0               0         2
+## 367    367          1.237               0           0               0         2
+## 368    368          1.050               0          30               0         0
+## 369    369          0.883               0           1               0         2
+## 370    370          1.034               0         141               0         2
+## 371    371          2.292               0           0               0         2
+## 372    372          0.753               0          44               0         0
+## 373    373          0.788               0           0               0         2
+## 374    374          0.833               0           0               0         1
+## 375    375          0.592               0          19               0         2
+## 376    376          1.631               0           0               0         1
+## 377    377          2.275               0           0               0         0
+## 378    378          1.469               0           0               0         1
+## 379    379          1.903               0           0               0         2
+## 380    380          1.418               0           0               0         2
+## 381    381          1.204               0           1               0         1
+## 382    382          1.483               0          37               0         1
+## 383    383          1.701               0           0               0         1
+## 384    384          1.418               0           1               0         1
+## 385    385          1.458               0           0               0         2
+## 386    386          1.673               0           0               0         0
+## 387    387          2.198               0           0               0         2
+## 388    388          1.371               0           0               0         1
+## 389    389          1.445               0           0               0         0
+## 390    390          2.070               0           0               0         2
+## 391    391          3.931               0           0               0         2
+## 392    392          1.493               0           4               0         2
+## 393    393          1.539               0           0               0         1
+## 394    394          1.440               0           0               0         1
+## 395    395          1.243               0           0               0         2
+## 396    396          1.242               0           1               0         0
+## 397    397          1.541               0           3               0         2
+## 398    398          1.969               0           0               0         1
+## 399    399          1.194               0           6               0         1
+## 400    400          1.599               0           0               0         2
+## 401    401          1.326               0           0               0         2
+## 402    402          1.709               0           0               0         1
+## 403    403          3.070               0           0               0         2
+## 404    404          1.880               0          82               0         2
+## 405    405          0.955               0           0               0         1
+## 406    406          0.917               0           3               0         1
+## 407    407          1.386               0           0               0         2
+## 408    408          1.252               0          47               0         2
+## 409    409          1.049               0           0               0         2
+## 410    410          0.910               0           0               0         1
+## 411    411          1.000               0           0               0         1
+## 412    412          1.100               0          84               0         2
+## 413    413          1.296               0           0               0         1
+## 414    414          0.932               0          99               0         0
+## 415    415          1.105               0           0               0         1
+## 416    416          0.991               0          50               0         1
+## 417    417          0.565               0           0               0         1
+## 418    418          1.721               0          40               0         1
+## 419    419          2.827               0          26               0         1
+## 420    420          1.324               0           0               0         0
+## 421    421          2.633               0           0               0         0
+## 422    422          2.131               0           0               0         2
+## 423    423          1.995               0          85               0         1
+## 424    424          1.445               0           1               0         2
+## 425    425          1.986               0           0               0         2
+## 426    426          2.317               0           0               0         1
+## 427    427          1.493               0           7               0         2
+## 428    428          1.869               0          19               0         0
+## 429    429          1.516               0           0               0         2
+## 430    430          2.215               0           0               0         2
+## 431    431          1.220               0           0               0         1
+## 432    432          2.053               0          67               0         2
+## 433    433          1.483               0           0               0         2
+## 434    434          2.289               0         310               0         0
+## 435    435          1.626               0           0               0         2
+## 436    436          1.657               0           0               0         2
+## 437    437          1.214               0           0               0         2
+## 438    438          1.502               0           0               0         2
+## 439    439          1.549               0           0               0         3
+## 440    440          1.527               0           0               0         2
+## 441    441          1.958               0          10               0         1
+## 442    442          1.635               0           4               0         1
+## 443    443          1.407               0           4               0         1
+## 444    444          1.505               0           2               0         2
+## 445    445          1.706               0           0               0         1
+## 446    446          1.031               0          40               0         1
+## 447    447          4.956               0           0               0         2
+## 448    448          1.306               0         192               0         0
+## 449    449          0.947               0           1               0         1
+## 450    450          2.213               0          16               0         1
+## 451    451          1.279               0          68               0         1
+## 452    452          1.341               0           0               0         0
+## 453    453          0.736               0           2               0         1
+## 454    454          1.087               0           0               0         0
+## 455    455          0.775               0           0               0         2
+## 456    456          0.718               0           0               0         0
+## 457    457          0.595               0           0               0         1
+## 458    458          0.440               0           0               0         2
+## 459    459          2.132               0           0               0         0
+## 460    460          2.403               0          42               0         0
+## 461    461          1.622               0          97               0         0
+## 462    462          1.768               0           0               0         2
+## 463    463          1.718               0           0               0         0
+## 464    464          1.375               0           0               0         0
+## 465    465          2.293               0          72               0         1
+## 466    466          1.736               0          42               0         0
+## 467    467          1.497               0           0               0         0
+## 468    468          1.334               0           2               0         1
+## 469    469          1.305               0           1               0         0
+## 470    470          1.607               0           0               0         1
+## 471    471          1.511               0          20               0         1
+## 472    472          1.794               0           0               0         1
+## 473    473          1.994               0          27               0         1
+## 474    474          3.650               0           0               0         2
+## 475    475          1.622               0           2               0         1
+## 476    476          1.327               0           0               0         1
+## 477    477          1.644               0          86               0         0
+## 478    478          1.967               0           0               0         1
+## 479    479          1.734               0           0               0         1
+## 480    480          1.505               0           0               0         0
+## 481    481          1.489               0           0               0         1
+## 482    482          1.778               0           0               0         1
+## 483    483          1.424               0           0               0         1
+## 484    484          1.810               0          41               0         1
+## 485    485          2.190               0           0               0         0
+## 486    486          1.607               0          16               0         1
+## 487    487          0.892               0           4               0         0
+## 488    488          1.007               0           0               0         1
+## 489    489          1.126               0           0               0         2
+## 490    490          1.086               0           6               0         1
+## 491    491          1.615               0          88               0         1
+## 492    492          0.835               0           1               0         2
+## 493    493          0.975               0           0               0         0
+## 494    494          1.399               0          31               0         1
+## 495    495          0.945               0           2               0         1
+## 496    496          0.901               0           0               0         2
+## 497    497          0.783               0          21               0         1
+## 498    498          0.799               0           0               0         0
+## 499    499          0.726               0         119               0         1
+## 500    500          0.477               0           0               0         1</code></pre>
+<pre class="r"><code># fit_id &lt;- 1
+# mcmc_pairs(SBC_res_suff_c$fits[[fit_id]]$draws(), pars = c(&quot;group_sd&quot;, &quot;intercept_sweep&quot;, paste0(&quot;group_r_raw[&quot;, c(1, 2), &quot;]&quot;)), transformations = my_transformations, np = nuts_params(SBC_res_suff_c$fits[[fit_id]]))</code></pre>
+<pre class="r"><code>plot_ecdf_diff(SBC_res_suff_c)</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
+<pre class="r"><code>plot_ecdf_diff(SBC_res_suff_c[SBC_res_suff_c$backend_diagnostics$n_divergent == 0])</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-26-2.png" width="672" /></p>
+<pre class="r"><code>plot_rank_hist(SBC_res_suff_c)</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-26-3.png" width="672" /></p>
+<pre class="r"><code>plot_rank_hist(SBC_res_suff_c[SBC_res_suff_c$backend_diagnostics$n_divergent == 0])</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-26-4.png" width="672" /></p>
+</div>
+</div>
+<div id="sufficient-statistics-non-centered" class="section level2">
+<h2>Sufficient statistics, non-centered</h2>
+<pre class="r"><code>model_suff_nc &lt;- cmdstan_model(&quot;intercept_suff_noncentered.stan&quot;)</code></pre>
+<pre class="r"><code>fit_suff_nc &lt;- model_suff_nc$sample(data = data_stan, refresh = 0)</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 4 finished in 3.7 seconds.
+## Chain 2 finished in 3.9 seconds.
+## Chain 1 finished in 3.9 seconds.
+## Chain 3 finished in 4.2 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 3.9 seconds.
+## Total execution time: 4.5 seconds.</code></pre>
+<pre class="r"><code>fit_suff_nc$summary()</code></pre>
+<pre><code>## # A tibble: 86 x 10
+##    variable         mean   median     sd    mad       q5      q95  rhat ess_bulk
+##    &lt;chr&gt;           &lt;dbl&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+##  1 lp__         -145.    -145.    4.48   4.47   -153.    -139.     1.02     588.
+##  2 intercept_s~    3.09     3.09  0.0388 0.0385    3.02     3.15   1.00    3582.
+##  3 group_r_raw~    1.89     1.87  0.422  0.426     1.24     2.61   1.01    1318.
+##  4 group_r_raw~    0.666    0.643 0.255  0.249     0.285    1.11   1.00    1968.
+##  5 group_r_raw~    0.502    0.482 0.235  0.224     0.154    0.917  1.00    2550.
+##  6 group_r_raw~    0.736    0.714 0.261  0.251     0.349    1.21   1.00    1852.
+##  7 group_r_raw~    0.828    0.802 0.270  0.269     0.428    1.29   1.00    1554.
+##  8 group_r_raw~   -0.365   -0.358 0.163  0.160    -0.638   -0.112  1.00    2135.
+##  9 group_r_raw~    0.993    0.968 0.291  0.282     0.563    1.51   1.01    1463.
+## 10 group_r_raw~   -1.19    -1.18  0.227  0.232    -1.58    -0.828  1.02     589.
+## # ... with 76 more rows, and 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+<pre class="r"><code>mcmc_pairs(fit_suff_nc$draws(), pars = my_pars(&quot;group_r_raw&quot;, N_groups - 1, &quot;intercept_sweep&quot;), transformations = my_transformations, np = nuts_params(fit_nc))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-30-1.png" width="672" /></p>
+<pre class="r"><code># mcmc_pairs(fit_suff_nc$draws(), pars = c(&quot;group_sd&quot;, &quot;intercept_sweep&quot;, paste0(&quot;group_r_raw[&quot;, c(1), &quot;]&quot;)), transformations = my_transformations, np = nuts_params(fit_suff_c), max_treedepth = 10)</code></pre>
+<div id="sbc-test-1" class="section level3">
+<h3>SBC Test</h3>
+<pre class="r"><code>suff_nc_backend &lt;- SBC_backend_cmdstan_sample(model_suff_nc, chains = 2)
+generator_nc &lt;- SBC_generator_function(generator, N = 6, N_groups = 3)
+datasets_nc &lt;- generate_datasets(generator_nc, n_datasets = 50)</code></pre>
+<pre><code>## Warning in generate_datasets.SBC_generator_function(generator_nc, n_datasets =
+## 50): n_datasets argument is deprecated, use n_sims instead</code></pre>
+<pre><code>## Warning in generate_datasets.SBC_generator_function(generator_nc, n_datasets
+## = 50): Generator function returns a list with element `parameters`, which is
+## deprecated. Return `variables` instead.</code></pre>
+<pre class="r"><code>SBC_res_suff_nc &lt;- compute_results(datasets_c, suff_nc_backend, 
+                                  gen_quants = generated_quantities(
+                                    mu_r = mean(group_r),
+                                    group_r_c = group_r - mean(group_r),
+                                    intercept_c = intercept + mean(group_r),
+                                    sd_c = sd(group_r),
+                                    log_lik = sum(dpois(y, exp(intercept + group_r[groups]), log = TRUE))),
+                                  keep_fits = FALSE,
+                                  cache_mode = &quot;results&quot;,
+                                  cache_location = file.path(SBC_cache_dir, &quot;suff_nc_datasets_nc.rds&quot;))</code></pre>
+<pre><code>## Warning in compute_results(datasets_c, suff_nc_backend, gen_quants =
+## generated_quantities(mu_r = mean(group_r), : compute_results() is deprecated,
+## use compute_SBC instead.</code></pre>
+<pre><code>## Cache file exists, but was computed with different thin_ranks/gen_quants/ensure_num_ranks_divisor and keep_fits == FALSE. Will recompute.</code></pre>
+<pre><code>##  - 163 (33%) fits had at least one Rhat &gt; 1.01. Largest Rhat was 2.235.</code></pre>
+<pre><code>##  - 76 (15%) fits had tail ESS undefined or less than half of the maximum rank, potentially skewing 
+## the rank statistics. The lowest tail ESS was NA.
+##  If the fits look good otherwise, increasing `thin_ranks` (via recompute_SBC_statistics) 
+## or number of posterior draws (by refitting) might help.</code></pre>
+<pre><code>##  - 400 (80%) fits had divergent transitions. Maximum number of divergences was 1030.</code></pre>
+<pre><code>##  - 5 (1%) fits had iterations that saturated max treedepth. Maximum number of max treedepth was 250.</code></pre>
+<pre><code>## Not all diagnostics are OK.
+## You can learn more by inspecting $default_diagnostics, $backend_diagnostics 
+## and/or investigating $outputs/$messages/$warnings for detailed output from the backend.</code></pre>
+<pre class="r"><code>plot_ecdf_diff(SBC_res_suff_nc)</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-32-1.png" width="672" /></p>
+<pre class="r"><code>plot_ecdf_diff(SBC_res_suff_nc[SBC_res_suff_nc$backend_diagnostics$n_divergent == 0])</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-32-2.png" width="672" /></p>
+<pre class="r"><code>plot_rank_hist(SBC_res_suff_nc)</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-32-3.png" width="672" /></p>
+<pre class="r"><code>plot_rank_hist(SBC_res_suff_nc[SBC_res_suff_nc$backend_diagnostics$n_divergent == 0])</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-32-4.png" width="672" /></p>
+<pre class="r"><code>SBC_res_suff_nc$backend_diagnostics</code></pre>
+<pre><code>##     sim_id max_chain_time n_failed_chains n_divergent n_max_treedepth n_rejects
+## 1        1          2.951               0          10               0         0
+## 2        2          2.812               0           9               0         0
+## 3        3          1.121               0          12               0         0
+## 4        4          3.323               0          18               0         0
+## 5        5          2.655               0           2               0         0
+## 6        6          2.391               0           0               0         0
+## 7        7          2.766               0          13               0         0
+## 8        8          3.142               0           3               0         0
+## 9        9          2.076               0           2               0         0
+## 10      10          5.777               0          18               0         0
+## 11      11          3.023               0          10               0         0
+## 12      12          3.345               0           3               0         0
+## 13      13         13.149               0           0               0         0
+## 14      14          3.148               0          30               0         0
+## 15      15          1.584               0           5               0         0
+## 16      16          2.530               0           7               0         0
+## 17      17          2.044               0          64               0         0
+## 18      18          6.548               0           0               0         0
+## 19      19          4.329               0           0               0         0
+## 20      20          6.102               0          14               0         0
+## 21      21          2.146               0           3               0         0
+## 22      22          1.572               0          65               0         0
+## 23      23          1.788               0          22               0         0
+## 24      24          2.574               0           5               0         0
+## 25      25          1.551               0          16               0         0
+## 26      26          4.851               0           0               0         0
+## 27      27          1.821               0          67               0         0
+## 28      28          7.992               0           0               0         0
+## 29      29          0.836               0           2               0         0
+## 30      30          1.554               0           5               0         0
+## 31      31          1.761               0           7               0         0
+## 32      32          2.355               0           9               0         0
+## 33      33          3.820               0           0               0         0
+## 34      34          2.138               0          51               0         0
+## 35      35          2.453               0           2               0         0
+## 36      36          7.115               0           1               0         0
+## 37      37          2.920               0          16               0         0
+## 38      38          2.496               0          25               0         0
+## 39      39          1.826               0           2               0         0
+## 40      40          2.130               0           0               0         0
+## 41      41          3.534               0           4               0         0
+## 42      42          4.031               0           6               0         0
+## 43      43          2.760               0           6               0         0
+## 44      44          3.014               0          10               0         0
+## 45      45          2.834               0          10               0         0
+## 46      46          1.769               0          30               0         0
+## 47      47          2.507               0         203               0         0
+## 48      48          3.161               0           1               0         0
+## 49      49          2.426               0           6               0         0
+## 50      50          2.270               0          14               0         0
+## 51      51          1.516               0           1               0         0
+## 52      52          1.985               0          38               0         0
+## 53      53          3.358               0           1               0         0
+## 54      54          3.146               0          11               0         0
+## 55      55          3.021               0           0               0         0
+## 56      56          3.410               0           9               0         0
+## 57      57          9.535               0           7               0         0
+## 58      58          3.943               0           1               0         0
+## 59      59          4.717               0           5               0         0
+## 60      60          2.326               0           9               0         0
+## 61      61          2.903               0          13               0         0
+## 62      62          2.212               0          16               0         0
+## 63      63          1.888               0           6               0         0
+## 64      64          1.767               0           0               0         0
+## 65      65         12.913               0           0               0         0
+## 66      66          1.606               0          41               0         0
+## 67      67          1.298               0          30               0         0
+## 68      68          1.982               0          20               0         0
+## 69      69          2.606               0           0               0         0
+## 70      70          6.569               0           1               0         0
+## 71      71          1.252               0          34               0         0
+## 72      72          2.115               0           0               0         0
+## 73      73          1.575               0          17               0         0
+## 74      74          2.738               0           0               0         0
+## 75      75          2.772               0           0               0         0
+## 76      76          1.715               0          34               0         0
+## 77      77          1.919               0          21               0         0
+## 78      78          1.244               0           5               0         0
+## 79      79          2.856               0          25               0         0
+## 80      80          1.694               0           4               0         0
+## 81      81          3.533               0           0               0         0
+## 82      82          3.459               0          25               0         0
+## 83      83          1.404               0          54               0         0
+## 84      84          1.976               0          17               0         0
+## 85      85          1.724               0           6               0         0
+## 86      86          6.694               0           0               0         0
+## 87      87          1.895               0          12               0         0
+## 88      88          2.004               0           6               0         0
+## 89      89          5.789               0           1               0         0
+## 90      90          1.714               0          31               0         0
+## 91      91          1.656               0          33               0         0
+## 92      92          2.010               0           6               0         0
+## 93      93          3.047               0           7               0         0
+## 94      94          1.771               0          35               0         0
+## 95      95          8.728               0           1               0         0
+## 96      96          3.212               0          15               0         0
+## 97      97          4.342               0           0               0         0
+## 98      98          2.914               0           6               0         0
+## 99      99          6.359               0           1               0         0
+## 100    100          2.537               0           1               0         0
+## 101    101          4.573               0           3               0         0
+## 102    102          1.386               0          23               0         0
+## 103    103          5.432               0           3               0         0
+## 104    104          2.189               0          26               0         0
+## 105    105          1.085               0           3               0         0
+## 106    106          4.486               0           3               0         0
+## 107    107          1.428               0           5               0         0
+## 108    108          1.564               0           8               0         0
+## 109    109          1.469               0           1               0         0
+## 110    110          3.477               0           1               0         0
+## 111    111          3.025               0           0               0         0
+## 112    112          1.024               0          11               0         0
+## 113    113          4.729               0           7               0         0
+## 114    114          1.381               0          34               0         0
+## 115    115          1.211               0           1               0         0
+## 116    116          1.806               0           3               0         0
+## 117    117          3.667               0          13               0         0
+## 118    118          1.009               0          23               0         0
+## 119    119          3.620               0           9               0         0
+## 120    120          2.862               0           0               0         0
+## 121    121          1.535               0           6               0         0
+## 122    122          2.048               0           9               0         0
+## 123    123          4.458               0           0               0         0
+## 124    124          1.109               0          10               0         0
+## 125    125          1.876               0           4               0         0
+## 126    126          1.584               0           3               0         0
+## 127    127         41.111               0           0             250         0
+## 128    128          1.819               0           3               0         0
+## 129    129          2.459               0         173               0         0
+## 130    130          3.084               0           3               0         0
+## 131    131          1.833               0          58               0         0
+## 132    132          2.305               0           4               0         0
+## 133    133          6.490               0           3               0         0
+## 134    134          1.826               0          33               0         0
+## 135    135          3.042               0          16               0         0
+## 136    136          7.666               0           0               0         0
+## 137    137          1.481               0          16               0         0
+## 138    138          3.942               0          19               0         0
+## 139    139          5.619               0           3               0         0
+## 140    140          4.799               0           1               0         0
+## 141    141          3.511               0           0               0         0
+## 142    142          1.599               0          11               0         0
+## 143    143          2.400               0           3               0         0
+## 144    144          2.088               0          18               0         0
+## 145    145          2.767               0           0               0         0
+## 146    146          1.778               0          42               0         0
+## 147    147          3.987               0           0               0         0
+## 148    148          9.640               0           0               0         0
+## 149    149          1.436               0           3               0         0
+## 150    150          5.418               0           0               0         0
+## 151    151          2.833               0           1               0         0
+## 152    152          3.382               0           1               0         0
+## 153    153          2.185               0          34               0         0
+## 154    154          1.197               0          34               0         0
+## 155    155          6.067               0           0               0         0
+## 156    156          2.332               0          14               0         0
+## 157    157          3.272               0           0               0         0
+## 158    158          3.186               0           0               0         0
+## 159    159          2.366               0          42               0         0
+## 160    160          2.700               0           0               0         0
+## 161    161          1.911               0           7               0         0
+## 162    162          0.468               0           0               0         0
+## 163    163          1.330               0          38               0         0
+## 164    164          0.961               0          43               0         0
+## 165    165          0.741               0           9               0         0
+## 166    166          0.818               0          51               0         0
+## 167    167          0.735               0           9               0         0
+## 168    168          3.296               0           5               0         0
+## 169    169          4.414               0          30               0         0
+## 170    170          4.686               0          32               0         0
+## 171    171          6.661               0           6               0         0
+## 172    172          3.576               0           1               0         0
+## 173    173          9.907               0           0               0         0
+## 174    174          3.780               0          27               0         0
+## 175    175          4.153               0           0               0         0
+## 176    176          3.872               0          56               0         0
+## 177    177          2.760               0          12               0         0
+## 178    178          3.683               0          52               0         0
+## 179    179          1.498               0           0               0         0
+## 180    180          2.606               0          22               0         0
+## 181    181          4.371               0         207               0         0
+## 182    182          6.262               0           7               0         0
+## 183    183          8.066               0           0               0         0
+## 184    184          2.726               0           1               0         0
+## 185    185          2.317               0           8               0         0
+## 186    186          2.462               0          15               0         0
+## 187    187          2.969               0          58               0         0
+## 188    188          1.903               0          32               0         0
+## 189    189          1.831               0          21               0         0
+## 190    190          4.997               0          10               0         0
+## 191    191          1.330               0          14               0         0
+## 192    192          1.893               0          21               0         0
+## 193    193          1.153               0           1               0         0
+## 194    194          1.198               0          10               0         0
+## 195    195          1.577               0           1               0         0
+## 196    196          2.240               0           7               0         0
+## 197    197          1.526               0           1               0         0
+## 198    198          3.144               0           1               0         0
+## 199    199          3.404               0           4               0         0
+## 200    200          2.469               0          17               0         0
+## 201    201          5.605               0           0               0         0
+## 202    202          1.825               0           0               0         0
+## 203    203          1.574               0          28               0         0
+## 204    204          5.194               0           5               0         0
+## 205    205          4.886               0           0               0         0
+## 206    206          2.901               0           0               0         0
+## 207    207          3.248               0           1               0         0
+## 208    208          1.575               0           3               0         0
+## 209    209          3.885               0           0               0         0
+## 210    210          2.946               0           0               0         0
+## 211    211          2.361               0          11               0         0
+## 212    212         31.020               0           0              65         0
+## 213    213          3.502               0           2               0         0
+## 214    214          1.747               0          17               0         0
+## 215    215          4.221               0          11               0         0
+## 216    216          6.920               0           0               0         0
+## 217    217         10.328               0           0               0         0
+## 218    218          3.136               0          45               0         0
+## 219    219          1.562               0           1               0         0
+## 220    220          1.848               0           1               0         0
+## 221    221          1.866               0          10               0         0
+## 222    222          3.111               0          88               0         0
+## 223    223          2.197               0          21               0         0
+## 224    224          2.695               0          13               0         0
+## 225    225          1.734               0          39               0         0
+## 226    226          8.629               0           0               0         0
+## 227    227          4.600               0           9               0         0
+## 228    228          2.430               0          32               0         0
+## 229    229          4.058               0           1               0         0
+## 230    230          7.865               0           0               0         0
+## 231    231          1.078               0           2               0         0
+## 232    232          1.309               0           1               0         0
+## 233    233          2.202               0           6               0         0
+## 234    234          1.074               0          98               0         0
+## 235    235          1.756               0          19               0         0
+## 236    236          3.587               0          13               0         0
+## 237    237          3.075               0           2               0         0
+## 238    238          8.065               0           0               0         0
+## 239    239          1.308               0          43               0         0
+## 240    240          1.214               0          15               0         0
+## 241    241          6.894               0           0               0         0
+## 242    242          5.699               0           7               0         0
+## 243    243          1.852               0          15               0         0
+## 244    244          1.119               0          35               0         0
+## 245    245          4.620               0           0               0         0
+## 246    246          1.444               0           7               0         0
+## 247    247          0.973               0           0               0         0
+## 248    248          1.046               0          38               0         0
+## 249    249          1.350               0          34               0         0
+## 250    250          0.856               0           9               0         0
+## 251    251          2.518               0          30               0         0
+## 252    252          1.706               0           5               0         0
+## 253    253          1.615               0          18               0         0
+## 254    254          1.967               0          24               0         0
+## 255    255         28.291               0           0              25         0
+## 256    256          3.230               0           2               0         0
+## 257    257          6.111               0           2               0         0
+## 258    258          3.762               0           0               0         0
+## 259    259         12.777               0          35               0         0
+## 260    260          7.941               0           1               0         0
+## 261    261          1.753               0          53               0         0
+## 262    262          4.126               0           1               0         0
+## 263    263          2.995               0          19               0         0
+## 264    264          3.925               0           0               0         0
+## 265    265          6.727               0           0               0         0
+## 266    266          6.008               0           1               0         0
+## 267    267          1.960               0          37               0         0
+## 268    268          5.949               0           2               0         0
+## 269    269          1.150               0          15               0         0
+## 270    270          0.834               0          10               0         0
+## 271    271          2.571               0           1               0         0
+## 272    272          2.330               0          32               0         0
+## 273    273          1.476               0           5               0         0
+## 274    274          7.327               0           1               0         0
+## 275    275          1.431               0          17               0         0
+## 276    276          1.421               0          76               0         0
+## 277    277          1.865               0          20               0         0
+## 278    278          1.290               0           7               0         0
+## 279    279          2.718               0           0               0         0
+## 280    280         11.897               0           1               0         0
+## 281    281          2.724               0           7               0         0
+## 282    282          1.164               0           1               0         0
+## 283    283          1.643               0         109               0         0
+## 284    284          3.091               0           0               0         0
+## 285    285          3.482               0           1               0         0
+## 286    286          1.166               0          31               0         0
+## 287    287          2.568               0           0               0         0
+## 288    288          1.265               0          36               0         0
+## 289    289          2.951               0           7               0         0
+## 290    290          0.547               0           1               0         0
+## 291    291          1.186               0          73               0         0
+## 292    292          1.218               0          26               0         0
+## 293    293          2.779               0           0               0         0
+## 294    294          3.230               0          13               0         0
+## 295    295          4.087               0           1               0         0
+## 296    296         11.452               0           0               0         0
+## 297    297          3.380               0           1               0         0
+## 298    298          1.518               0          29               0         0
+## 299    299          1.532               0          60               0         0
+## 300    300          2.377               0           3               0         0
+## 301    301          5.873               0          15               0         0
+## 302    302         10.944               0           0               0         0
+## 303    303          3.102               0          33               0         0
+## 304    304          2.550               0          24               0         0
+## 305    305          4.991               0           1               0         0
+## 306    306          8.100               0           3               0         0
+## 307    307          4.016               0           5               0         0
+## 308    308          1.769               0          27               0         0
+## 309    309          1.748               0          15               0         0
+## 310    310          1.348               0          28               0         0
+## 311    311          1.765               0          62               0         0
+## 312    312          2.320               0           6               0         0
+## 313    313          8.296               0           0               0         0
+## 314    314          2.914               0           2               0         0
+## 315    315          3.869               0           0               0         0
+## 316    316          3.186               0           6               0         0
+## 317    317          3.930               0           1               0         0
+## 318    318          1.089               0          21               0         0
+## 319    319          1.732               0           5               0         0
+## 320    320          2.568               0           5               0         0
+## 321    321          1.076               0           9               0         0
+## 322    322          1.561               0          37               0         0
+## 323    323         18.278               0           0               0         0
+## 324    324          2.132               0           7               0         0
+## 325    325         25.348               0           0             197         0
+## 326    326          4.443               0           3               0         0
+## 327    327          6.635               0           2               0         0
+## 328    328          1.008               0           0               0         0
+## 329    329          0.996               0          10               0         0
+## 330    330          1.727               0           1               0         0
+## 331    331          0.961               0           0               0         0
+## 332    332          2.144               0           3               0         0
+## 333    333          0.814               0          55               0         0
+## 334    334          1.980               0          37               0         0
+## 335    335         11.807               0           0               0         0
+## 336    336          6.866               0           1               0         0
+## 337    337          1.344               0          10               0         0
+## 338    338          5.638               0          18               0         0
+## 339    339          1.622               0           6               0         0
+## 340    340          0.793               0           0               0         0
+## 341    341          1.874               0          41               0         0
+## 342    342          6.962               0           4               0         0
+## 343    343          1.805               0          24               0         0
+## 344    344          2.303               0           0               0         0
+## 345    345          1.583               0          10               0         0
+## 346    346          3.572               0           3               0         0
+## 347    347         13.041               0           2               0         0
+## 348    348          1.920               0          16               0         0
+## 349    349          2.492               0          34               0         0
+## 350    350          3.621               0           0               0         0
+## 351    351          4.364               0          26               0         0
+## 352    352          4.067               0           1               0         0
+## 353    353          1.413               0          36               0         0
+## 354    354          1.517               0          27               0         0
+## 355    355          2.798               0           0               0         0
+## 356    356          3.894               0           3               0         0
+## 357    357          1.368               0          16               0         0
+## 358    358          2.067               0          27               0         0
+## 359    359          1.270               0          38               0         0
+## 360    360          1.781               0           3               0         0
+## 361    361          5.385               0           0               0         0
+## 362    362          2.290               0          27               0         0
+## 363    363          1.910               0          21               0         0
+## 364    364          1.199               0          19               0         0
+## 365    365          1.835               0           3               0         0
+## 366    366          1.321               0           8               0         0
+## 367    367          3.974               0           5               0         0
+## 368    368          0.906               0           1               0         0
+## 369    369          2.582               0           5               0         0
+## 370    370          1.091               0          86               0         0
+## 371    371          8.159               0           0               0         0
+## 372    372          1.411               0          80               0         0
+## 373    373          2.194               0           4               0         0
+## 374    374          2.989               0           2               0         0
+## 375    375          1.408               0          30               0         0
+## 376    376          2.173               0          22               0         0
+## 377    377          5.958               0           0               0         0
+## 378    378          4.338               0           1               0         0
+## 379    379         11.936               0          27               0         0
+## 380    380          2.347               0          46               0         0
+## 381    381          1.959               0          26               0         0
+## 382    382          1.303               0          11               0         0
+## 383    383          2.667               0          12               0         0
+## 384    384          2.356               0          21               0         0
+## 385    385          4.747               0          24               0         0
+## 386    386          2.887               0          16               0         0
+## 387    387          5.642               0           0               0         0
+## 388    388          5.137               0           9               0         0
+## 389    389          4.593               0           4               0         0
+## 390    390          2.835               0           0               0         0
+## 391    391          6.890               0           0               0         0
+## 392    392          2.594               0          62               0         0
+## 393    393          1.902               0           0               0         0
+## 394    394          2.871               0          19               0         0
+## 395    395          2.296               0          75               0         0
+## 396    396          2.979               0          22               0         0
+## 397    397          3.346               0         121               0         0
+## 398    398          2.393               0           2               0         0
+## 399    399          2.235               0          30               0         0
+## 400    400          2.136               0          12               0         0
+## 401    401          3.736               0          10               0         0
+## 402    402          1.962               0           1               0         0
+## 403    403          8.469               0           0               0         0
+## 404    404          1.120               0          51               0         0
+## 405    405          2.546               0           0               0         0
+## 406    406          1.477               0          14               0         0
+## 407    407          2.286               0           0               0         0
+## 408    408          1.223               0          21               0         0
+## 409    409          3.222               0           0               0         0
+## 410    410          0.905               0           9               0         0
+## 411    411          1.738               0           0               0         0
+## 412    412          1.268               0          20               0         0
+## 413    413         10.702               0           1               0         0
+## 414    414          1.073               0           7               0         0
+## 415    415          3.056               0           1               0         0
+## 416    416          1.009               0          14               0         0
+## 417    417          1.763               0          40               0         0
+## 418    418          1.993               0           7               0         0
+## 419    419          2.234               0           3               0         0
+## 420    420          3.620               0          21               0         0
+## 421    421         10.048               0           0               0         0
+## 422    422          2.542               0           0               0         0
+## 423    423          1.163               0          16               0         0
+## 424    424          2.296               0         162               0         0
+## 425    425          2.657               0           0               0         0
+## 426    426          5.977               0           0               0         0
+## 427    427          2.111               0          20               0         0
+## 428    428          1.997               0          10               0         0
+## 429    429          3.106               0           0               0         0
+## 430    430          8.114               0           0               0         0
+## 431    431          2.834               0          16               0         0
+## 432    432          1.847               0          17               0         0
+## 433    433          2.938               0           5               0         0
+## 434    434          1.770               0          16               0         0
+## 435    435          6.215               0           2               0         0
+## 436    436          4.698               0           1               0         0
+## 437    437          2.883               0          39               0         0
+## 438    438          3.975               0           5               0         0
+## 439    439          4.775               0           7               0         0
+## 440    440          2.837               0           1               0         0
+## 441    441          1.342               0          13               0         0
+## 442    442          1.482               0          17               0         0
+## 443    443          1.444               0          24               0         0
+## 444    444          1.475               0          30               0         0
+## 445    445          2.304               0           0               0         0
+## 446    446          0.961               0           6               0         0
+## 447    447         17.311               0           0              12         0
+## 448    448          0.897               0        1030               0         0
+## 449    449          1.615               0         236               0         0
+## 450    450          1.187               0          15               0         0
+## 451    451          1.104               0          20               0         0
+## 452    452          1.604               0          18               0         0
+## 453    453          2.409               0          26               0         0
+## 454    454         10.701               0           0               0         0
+## 455    455          1.748               0           3               0         0
+## 456    456          1.961               0          33               0         0
+## 457    457          2.688               0          13               0         0
+## 458    458          1.470               0           3               0         0
+## 459    459          3.230               0          11               0         0
+## 460    460          1.361               0          20               0         0
+## 461    461          1.350               0          29               0         0
+## 462    462          2.793               0           9               0         0
+## 463    463          1.551               0           2               0         0
+## 464    464          3.946               0          22               0         0
+## 465    465          1.650               0          19               0         0
+## 466    466          1.515               0          33               0         0
+## 467    467          3.127               0          24               0         0
+## 468    468          1.927               0          71               0         0
+## 469    469          2.034               0         308               0         0
+## 470    470          3.640               0           3               0         0
+## 471    471          1.216               0           7               0         0
+## 472    472          3.111               0           6               0         0
+## 473    473          1.645               0          26               0         0
+## 474    474         26.329               0           0               0         0
+## 475    475          2.251               0          19               0         0
+## 476    476          2.275               0          19               0         0
+## 477    477          1.426               0          63               0         0
+## 478    478          3.106               0           0               0         0
+## 479    479          4.862               0           0               0         0
+## 480    480          3.463               0           1               0         0
+## 481    481          3.484               0           1               0         0
+## 482    482          2.493               0          22               0         0
+## 483    483          2.070               0          39               0         0
+## 484    484          1.057               0          12               0         0
+## 485    485          3.103               0           1               0         0
+## 486    486          1.322               0          18               0         0
+## 487    487          1.504               0          90               0         0
+## 488    488          1.328               0           1               0         0
+## 489    489          2.906               0          20               0         0
+## 490    490          1.184               0           2               0         0
+## 491    491          1.164               0          51               0         0
+## 492    492          1.247               0           0               0         0
+## 493    493          2.379               0          13               0         0
+## 494    494          1.495               0           4               0         0
+## 495    495          1.597               0          13               0         0
+## 496    496          2.479               0           0               0         0
+## 497    497          1.178               0          19               0         0
+## 498    498          2.002               0           0               0         0
+## 499    499          1.412               0          19               0         0
+## 500    500          1.252               0           1               0         0</code></pre>
+<pre class="r"><code>fit &lt;- model_suff_nc$sample(datasets_nc$generated[[27]])</code></pre>
+<pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
+## 
+## Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 1 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 1 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 2 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 2 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 2 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 3 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 3 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 3 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+## Chain 4 Iteration:  100 / 2000 [  5%]  (Warmup) 
+## Chain 4 Iteration:  200 / 2000 [ 10%]  (Warmup) 
+## Chain 1 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 1 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 1 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 1 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 1 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 1 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 2 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 2 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 2 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 2 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 2 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 2 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 3 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 3 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 3 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 3 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 3 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 4 Iteration:  300 / 2000 [ 15%]  (Warmup) 
+## Chain 4 Iteration:  400 / 2000 [ 20%]  (Warmup) 
+## Chain 4 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+## Chain 4 Iteration:  600 / 2000 [ 30%]  (Warmup) 
+## Chain 4 Iteration:  700 / 2000 [ 35%]  (Warmup) 
+## Chain 4 Iteration:  800 / 2000 [ 40%]  (Warmup) 
+## Chain 1 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 2 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 3 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 3 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 4 Iteration:  900 / 2000 [ 45%]  (Warmup) 
+## Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+## Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+## Chain 1 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 1 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 1 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 2 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 2 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 3 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 3 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 4 Iteration: 1100 / 2000 [ 55%]  (Sampling) 
+## Chain 4 Iteration: 1200 / 2000 [ 60%]  (Sampling) 
+## Chain 1 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 2 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 2 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 3 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 3 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 3 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 4 Iteration: 1300 / 2000 [ 65%]  (Sampling) 
+## Chain 4 Iteration: 1400 / 2000 [ 70%]  (Sampling) 
+## Chain 1 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 1 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 2 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 3 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 4 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
+## Chain 1 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 2 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 2 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 3 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 3 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 4 Iteration: 1600 / 2000 [ 80%]  (Sampling) 
+## Chain 1 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 1 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 2 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 4 Iteration: 1700 / 2000 [ 85%]  (Sampling) 
+## Chain 4 Iteration: 1800 / 2000 [ 90%]  (Sampling) 
+## Chain 3 finished in 1.1 seconds.
+## Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 4 Iteration: 1900 / 2000 [ 95%]  (Sampling) 
+## Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+## Chain 1 finished in 1.2 seconds.
+## Chain 2 finished in 1.2 seconds.
+## Chain 4 finished in 1.3 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.2 seconds.
+## Total execution time: 1.5 seconds.</code></pre>
+<pre class="r"><code>mcmc_pairs(fit$draws(), pars = my_pars(&quot;group_r_raw&quot;, 2, &quot;intercept_sweep&quot;), transformations = my_transformations, np = nuts_params(fit))</code></pre>
+<p><img src="/post/2021-intercept-correlations_files/figure-html/unnamed-chunk-34-1.png" width="672" /></p>
+</div>
+</div>

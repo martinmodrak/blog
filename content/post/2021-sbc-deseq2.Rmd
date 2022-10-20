@@ -17,8 +17,8 @@ library(apeglm)
 
 # Setup multiprocessing
 library(future)
-#plan(tweak(multisession, workers = 16))
-plan(multisession)
+plan(tweak(multisession, workers = 10))
+#plan(multisession)
 
 theme_set(cowplot::theme_cowplot())
 
@@ -27,6 +27,10 @@ cache_dir <- "./_sbc_deseq2_cache/"
 if(!dir.exists(cache_dir)) {
   dir.create(cache_dir)
 }
+
+image_path <- "."
+image_width <- 5
+image_height <- 3
 
 ```
 
@@ -161,10 +165,21 @@ generator_single_DEseq2 <- function(N_per_group,
 
 
 ```{r}
-overall_coverage <- function(res, width = 0.95) {
+merge_stats <- function(res) {
   merged_stats <- dplyr::mutate(res$stats, variable = "Merged", sim_id = 1:dplyr::n())
   merged_stats <- dplyr::filter(merged_stats, !is.na(rank))
-  dplyr::select(empirical_coverage(merged_stats, width), width, estimate)
+  merged_stats
+}
+
+overall_coverage <- function(res, width = 0.95) {
+  merged_stats <- merge_stats(res)
+  #dplyr::select(empirical_coverage(merged_stats, width), width, estimate)
+  empirical_coverage(merged_stats, width)
+}
+
+plot_coverage_diff_merged <- function(res) {
+  plot_coverage_diff(merge_stats(res), max_points = 101)  +
+    geom_vline(color = "orangered", alpha = 0.8, xintercept = 0.95)
 }
 ```
 
@@ -231,6 +246,14 @@ plot_coverage_diff(res3, variables = pars_to_show)
 overall_coverage(res3)
 ```
 
+```{r}
+p <- plot_coverage_diff_merged(res3)
+p
+ggsave(file.path(image_path,"3_normal_diff.png"), p,
+  width = image_width, height = image_height)
+```
+
+
 ## 3 samples, normal, useT
 
 ```{r}
@@ -253,6 +276,14 @@ plot_coverage_diff(res3_t, variables = pars_to_show)
 overall_coverage(res3_t)
 ```
 
+```{r}
+p <- plot_coverage_diff_merged(res3_t)
+p
+ggsave(file.path(image_path,"3_normal_t_diff.png"), p,
+  width = image_width, height = image_height)
+```
+
+
 ## 3 samples, none
 
 ```{r}
@@ -274,6 +305,39 @@ plot_coverage_diff(res3_none, variables = pars_to_show)
 
 ```{r}
 overall_coverage(res3_none)
+```
+
+```{r}
+p <-  plot_coverage_diff_merged(res3_none)
+p
+ggsave(file.path(image_path,"3_none_diff.png"),
+  p,
+  width = image_width, height = image_height)
+```
+
+```{r}
+empirical_coverage(dplyr::mutate(dplyr::filter(res3_none$stats, q5 > 0 | q95 < 0), variable = "Merged"), width = 0.95)
+```
+
+## 3 samples, none, use T
+
+```{r}
+res3_none_t <- compute_SBC(datasets3, SBC_backend_DESeq2(shrink_type = "none", useT = TRUE), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
+                         cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_none_t"),
+                        keep_fits = FALSE)
+```
+
+```{r}
+overall_coverage(res3_none_t)
+```
+
+
+```{r}
+p <- plot_coverage_diff_merged(res3_none_t)
+p
+ggsave(file.path(image_path,"3_none_t_diff.png"), p,
+  width = image_width, height = image_height)
 ```
 
 ## 20 samples, apeglm
@@ -306,6 +370,15 @@ plot_coverage_diff(res20_apeglm, variables = pars_to_show)
 ```{r}
 overall_coverage(res20_apeglm)
 ```
+
+```{r}
+p <-  plot_coverage_diff_merged(res20_apeglm)
+p
+ggsave(file.path(image_path,"20_apeglm_diff.png"),
+  p,
+  width = image_width, height = image_height)
+```
+
 
 ## 20 samples, apeglm, useT
 
@@ -359,6 +432,23 @@ plot_coverage_diff(res3_apeglm, variables = pars_to_show)
 overall_coverage(res3_apeglm)
 ```
 
+
+
+```{r}
+coverage_plot <- plot_coverage(merge_stats(res3_apeglm),
+       max_points = 101)
+ggsave(file.path(image_path, "3_apeglm_coverage.png"), coverage_plot,
+        width = image_width, height = image_height)
+```
+
+```{r}
+ggsave(file.path(image_path,"3_apeglm_diff.png"),
+  plot_coverage_diff_merged(res3_apeglm),
+  width = image_width, height = image_height)
+```
+
+
+
 ```{r}
 # TODO resolve, why we have NA lfcSE with apeglm (maybe a bug in apeglm)
 # tt <- SBC_fit.SBC_backend_DEseq2(SBC_backend_DESeq2(shrink_type = "apeglm"), datasets3$generated[[810]],  1)
@@ -375,6 +465,28 @@ overall_coverage(res3_apeglm)
 ```{r}
 datasets3$generated[[613]]$countData[613,]
 ```
+
+## 3 samples, apeglm, use T
+
+```{r}
+res3_apeglm_t <- compute_SBC(datasets3, SBC_backend_DESeq2(shrink_type = "apeglm", useT = TRUE), globals = c("SBC_fit.SBC_backend_DEseq2", "SBC_fit_to_draws_matrix.SBC_fit_DESeq2",
+                                                          "SBC_backend_iid_draws.SBC_backend_DEseq2"),
+                         cache_mode = "results", cache_location = file.path(cache_dir, "SBC_3_apeglm_t"),
+                        keep_fits = FALSE)
+```
+
+```{r}
+overall_coverage(res3_apeglm_t)
+```
+
+
+```{r}
+p <- plot_coverage_diff_merged(res3_apeglm_t)
+p
+ggsave(file.path(image_path,"3_apeglm_t_diff.png"), p,
+  width = image_width, height = image_height)
+```
+
 
 ## 3 samples, narrow, none
 
