@@ -32,14 +32,17 @@ pygmentscodefences = true
 [[menu.main]]
     name = "ORCID"
     url = "http://orcid.org/0000-0002-8886-7797"
+    pre = "me"
     weight = 3 
 [[menu.main]]
     name = "GitHub"
     url = "https://github.com/martinmodrak"
+    pre = "me"
     weight = 4
 [[menu.main]]
     name = "Mastodon"
     url = "https://fediscience.org/web/@modrak_m"
+    pre = "me"
     weight = 5
 [[menu.main]]
     name = "Consulting"
