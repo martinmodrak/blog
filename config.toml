@@ -38,8 +38,8 @@ pygmentscodefences = true
     url = "https://github.com/martinmodrak"
     weight = 4
 [[menu.main]]
-    name = "Twitter"
-    url = "https://twitter.com/modrak_m"
+    name = "Mastodon"
+    url = "https://fediscience.org/web/@modrak_m"
     weight = 5
 [[menu.main]]
     name = "Consulting"
