@@ -41,7 +41,7 @@ pygmentscodefences = true
     weight = 4
 [[menu.main]]
     name = "Mastodon"
-    url = "https://fediscience.org/web/@modrak_m"
+    url = "https://fediscience.org/@modrak_m"
     pre = "me"
     weight = 5
 [[menu.main]]
