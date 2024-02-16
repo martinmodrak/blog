@@ -1,0 +1,285 @@
+---
+title: "Putting predictors on random effect standard deviations with brms"
+date: 2021-04-01
+draft: true
+tags: ["R","Stan","brms", "random effects"]
+---
+
+`brms` is a great package. It allows you to put predictors on a lot of things.
+Its power is however not absolute --- one thing it doesn't let you do is use data to predict variances of random/varying effects. 
+
+To be precise, you can use the construct `(1|gr(patient, by = Trt))` which fits a 
+separate standard deviation for each level of `Trt`, which
+is almost the same as using `Trt` as a categorical predictor for the standard deviation. 
+You however cannot go further and use more complex predictors here. E.g. the following model is impossible in plain `brms` :
+
+$$
+y_i \sim N\left(\mu_i, \sigma \right) \\
+\mu_i = \alpha + \beta x_i + \gamma_{\text{patient}(i)} \\
+\gamma_{p} \sim N \left(0, \tau_{\text{treatment}(p)}\right) \\
+\tau_t = \alpha^\prime + \beta^\prime x^\prime_t
+$$
+
+Where $x$ is a vector of observation-level predictors while $x^\prime$ is a vector of treatment-level predictors. 
+In between we have patients --- each contribution a bunch of observations and the standard deviation of the 
+patient-level random intercepts depends on our treatment-level predictors.
+
+
+Well, it is not completely impossible to build such a model. Since `brms` is _immensely_ hackable, you can
+actually make this work. This blogpost will discuss how to do this. This does not
+mean it is a good idea or that you _should_ do it. I am just showing that it is 
+possible and hopefully also showing more general ways to hack with `brms`.
+
+The main downside of my approach is that it forces you to completely override
+the likelihood and that you have to build the random effect with predicted sigma
+manually in Stan. This may mean the benefits of `brms` are now too small and 
+you might be better off building the whole thing directly in Stan.
+
+## Setting up
+
+Let's set up and get our hands dirty.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(cmdstanr)
+library(brms)
+library(tidyverse)
+library(knitr)
+library(bayesplot)
+
+ggplot2::theme_set(cowplot::theme_cowplot())
+options(mc.cores = parallel::detectCores(), brms.backend = "cmdstanr")
+
+cache_dir <- "_brms_ranef_cache"
+if(!dir.exists(cache_dir)) {
+  dir.create(cache_dir)
+}
+
+```
+
+
+## Simulate data
+
+Note that the way we have setup the model implies that patients are nested within treatments (i.e. that each patient only ever gets one treatment). 
+Since each random effect can only have one prior distribution, this is the easiest way to make sense of the model.
+
+_Note: Another interpretation of "predicting random effect sd" is that you take a random effect and then multiply it by a different value based on other predictors. This should be possible to achieve that with
+non-linear formulas and this blog does not address this case_.
+
+First, we setup the treatment-level predictors in a treatment-level data frame and use those to predict the sds ($\tau$ above).
+
+```{r}
+set.seed(354855)
+N <- 1000
+N_pts <- floor(N / 3)
+N_trts <- 10
+trt_intercept <- 0
+trt_x_b <- 1
+trt_data <- data.frame(trt_x = rnorm(N_trts))
+# Corresponds to tau in the mathematical model
+trt_sd <- exp(trt_intercept + trt_x_b * trt_data$trt_x)
+```
+
+Now we setup the patient-level random effects, with varying sds (corresponding to $\gamma$ above).
+
+```{r}
+patient_treatment <- sample(1:N_trts, size = N_pts, replace = TRUE)
+ranef <- rnorm(N_pts, mean = 0, sd = trt_sd[patient_treatment])
+```
+
+Now we setup the main data frame showing multiple observations of each patient.
+
+```{r}
+intercept <- 1
+x_b <- 0.5
+obs_sigma <- 1
+base_data <- data.frame(x = rnorm(N), 
+                        patient_id = rep(1:N_pts, length.out = N))
+
+base_data$trt_id <- patient_treatment[base_data$patient_id]
+
+base_data_predictor <- intercept + x_b * base_data$x + ranef[base_data$patient_id]
+base_data$y <- rnorm(N, mean = base_data_predictor , sd = obs_sigma)
+```
+
+
+## Implement the model
+
+The first problem to solve is that at its core, `brms` requires us to use a single data
+frame as input, but we have a treatment-level data frame and then an observation-level 
+data frame. We get around this by adding dummy values so that both data 
+frames have the same column, binding the together and then using the `subset`
+addition term use different formulas for each. We will also need a dummy outcome
+variable for the treatment-level data.
+
+```{r}
+combined_data <- rbind(
+  base_data %>% mutate(
+    is_trt = FALSE,
+    trt_x = 0,
+    trt_y = 0
+  ),
+  trt_data %>% mutate(
+    is_trt = TRUE,
+    trt_id = 0,
+    patient_id = 0,
+    y = 0,
+    x = 0,
+    trt_y = 0
+  )
+)
+```
+
+
+The main idea for implementation is that we completely overtake the machinery of `brms` after
+the linear predictors are constructed. To do that, we create a custom family
+that is empty (i.e. adds nothing to the log likelihood) and use it.
+
+```{r}
+# Build the empty families --- one has just a single parameter and will be used 
+# for treatment-level sds. The other has mu and sigma parameter will be used
+# for the observation model.
+empty_for_trt <- custom_family("empty_for_trt", type = "real")
+empty_for_obs <- custom_family("empty_for_obs",  dpars = c("mu", "sigma"), 
+                               links = c("identity", "log"), type = "real")
+
+empty_func_stanvar <- stanvar(block = "functions", scode = "
+  real empty_for_trt_lpdf(real y, real mu) {
+    return 0;
+  } 
+  
+  real empty_for_obs_lpdf(real y, real mu, real sigma) {
+    return 0;
+  }
+")
+
+```
+
+
+We then take the linear predictions for the sd of the random effects ($\tau$) 
+and use it to
+manually build our random effect values (with non-centered parametrization). 
+We manually add those values to the
+rest of the linear predictor term and then manually add our desired likelihood.
+
+This will let our final formula to look this way:
+
+```{r}
+f <- mvbrmsformula(
+    brmsformula(y | subset(!is_trt)  ~ x, family = empty_for_obs),
+    brmsformula(trt_y | subset(is_trt)  ~ trt_x, family = empty_for_trt),
+    rescor = FALSE)
+
+```
+
+
+In this setup, `brms` will build a bunch of variables for both formulas.
+Their names will depend on the name of the outcome variables --- since our
+main outcome is `y`, relevant variables will be `N_y` (number of rows
+for this outcome), `mu_y` and `sigma_y` (distributional parameters for this outcome).
+
+Our dummy outcome is `trt_y` and the relevant variables will be `N_trty` and `mu_trty`,
+because `brms` removes underscores. You can always use `make_stancode` and
+`make_standata` to see how `brms` transforms names and input data.
+
+For all this to happen we also need to pass a bunch of extra data.
+
+Let us prepare the extra Stan code.
+
+```{r}
+# Pass the extra data. We'll take advantage of some already existing data
+# variables defined by brms, these include:
+# N_y - the number of observation-level data 
+# N_trty - the number of treatment-level data (and thus the number of treatments)
+data_stanvars <- 
+  stanvar(x = N_pts, block = "data", scode = "int<lower=2> N_pts;") +
+  stanvar(x = patient_treatment, name = "trt_id", block = "data", 
+          scode = "array[N_pts] int<lower=1, upper=N_trty> trt_id;") +
+  stanvar(x = base_data$patient_id, name = "patient_id", block = "data", 
+          scode = "array[N_y] int<lower=1, upper=N_pts> patient_id;")
+
+# Raw parameters for the random effects
+parameter_stanvar <- 
+  stanvar(block = "parameters", scode = "
+      vector[N_pts] my_ranef_raw;
+      ")
+
+# Prior - we are using non-centered parametrization, so it is just N(0,1)
+# and we multiply by the sd later.
+# Note that current versions of brms compute log-prior in the transformed
+# parameters block, so we do it as well.
+prior_stanvar <-
+  stanvar(block = "tparameters", 
+          scode = "lprior += std_normal_lpdf(to_vector(my_ranef_raw));")
+
+# Here is where we add the random effect to the existing predictor values and 
+# reconstruct the likelihood.
+# Once again using the values generated by brms for the predictors in mu_trty,
+# mu_y, sigma_y.
+likelihood_stanvar <- 
+  stanvar(block = "likelihood", position = "end", scode = "
+      // New scope to let us introduce new parameters
+      {
+          vector[N_trty] trt_sds = exp(mu_trty);
+          vector[N_pts] my_ranef = my_ranef_raw .* trt_sds[trt_id];
+          for(n in 1: N_y) {
+            // Add the needed ranef 
+            real mu_with_ranef = mu_y[n] + my_ranef[patient_id[n]];
+            // reimplement the likelihood
+            target += normal_lpdf(Y_y[n] | mu_with_ranef, sigma_y);
+          }
+      }
+          ") 
+  
+
+predict_ranef_stanvars <- empty_func_stanvar + 
+  data_stanvars + 
+  parameter_stanvar + 
+  prior_stanvar +
+  likelihood_stanvar
+```
+
+This is the complete Stan code generated by `brms` with our additions:
+
+```{r}
+make_stancode(f, data = combined_data,
+  stanvars = predict_ranef_stanvars)
+```
+
+
+```{r, include=FALSE}
+dd <- make_standata(  
+  f, 
+  data = combined_data,
+  stanvars = predict_ranef_stanvars)
+
+dd$N_y
+```
+
+
+Now, we can compile and fit the model:
+
+```{r}
+fit <- brm(  
+  f, 
+  data = combined_data,
+  stanvars = predict_ranef_stanvars)
+```
+
+
+
+```{r}
+summary(fit)
+```
+
+
+
+If you encounter problems running the models that you can't resolve yourself, be
+sure to ask questions on [Stan Discourse](https://discourse.mc-stan.org) and tag
+me (@martinmodrak) in the question!
+
+## Original computing environment 
+
+```{r}
+sessionInfo()
+```
+
