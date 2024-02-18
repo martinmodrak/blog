@@ -1,17 +1,18 @@
 ---
-title: "Putting predictors on random effect standard deviations with brms"
-date: 2021-04-01
+title: "Brms hacking: linear predictors for random effect standard deviations"
+date: 2024-02-17
 draft: true
 tags: ["R","Stan","brms", "random effects"]
 ---
 
 `brms` is a great package. It allows you to put predictors on a lot of things.
-Its power is however not absolute --- one thing it doesn't let you do is use data to predict variances of random/varying effects. 
+Its power is however not absolute --- one thing it doesn't let you directly do is use data to predict variances of random/varying effects. Here we will show pretty general techniques
+to hack with `brms` that let us achieve exactly this goal (and many more).
 
-To be precise, you can use the construct `(1|gr(patient, by = Trt))` which fits a 
-separate standard deviation for each level of `Trt`, which
-is almost the same as using `Trt` as a categorical predictor for the standard deviation. 
-You however cannot go further and use more complex predictors here. E.g. the following model is impossible in plain `brms` :
+To be precise, you can use the construct `(1|gr(patient, by = trt))` which fits a 
+separate standard deviation for each level of `trt`, which
+is almost the same as using `trt` as a categorical predictor for the standard deviation. 
+You however cannot go further and use any other type of predictors here. E.g. the following model is impossible in plain `brms` :
 
 $$
 y_i \sim N\left(\mu_i, \sigma \right) \\
@@ -21,19 +22,23 @@ y_i \sim N\left(\mu_i, \sigma \right) \\
 $$
 
 Where $x$ is a vector of observation-level predictors while $x^\prime$ is a vector of treatment-level predictors. 
-In between we have patients --- each contribution a bunch of observations and the standard deviation of the 
+In between we have patients --- each contributing a bunch of observations and the standard deviation of the 
 patient-level random intercepts depends on our treatment-level predictors.
 
 
-Well, it is not completely impossible to build such a model. Since `brms` is _immensely_ hackable, you can
+Well, it is not completely impossible. Since `brms` is _immensely_ hackable, you can
 actually make this work. This blogpost will discuss how to do this. This does not
 mean it is a good idea or that you _should_ do it. I am just showing that it is 
-possible and hopefully also showing more general ways to hack with `brms`.
+possible and hopefully also showing some general ways to hack with `brms`.
 
 The main downside of my approach is that it forces you to completely override
 the likelihood and that you have to build the random effect with predicted sigma
-manually in Stan. This may mean the benefits of `brms` are now too small and 
+in hand-written Stan code. This may mean the benefits of `brms` are now too small and 
 you might be better off building the whole thing directly in Stan.
+
+Also, this type of model is likely to be a bit data-hungry --- you need to have
+enough observations per treatment and enough treatments to be able to estimate $\tau$ 
+well enough to learn about its predictors.
 
 ## Setting up
 
@@ -62,15 +67,15 @@ if(!dir.exists(cache_dir)) {
 Note that the way we have setup the model implies that patients are nested within treatments (i.e. that each patient only ever gets one treatment). 
 Since each random effect can only have one prior distribution, this is the easiest way to make sense of the model.
 
-_Note: Another interpretation of "predicting random effect sd" is that you take a random effect and then multiply it by a different value based on other predictors. This should be possible to achieve that with
-non-linear formulas and this blog does not address this case_.
+_Note: Another interpretation of "predicting random effect sd" is that you take an $N(0,1)$ distributed random effect and then multiply it by a different value based on other predictors. It should be possible to achieve that with
+non-linear formulas in `brms` and this blog does not address this case_.
 
 First, we setup the treatment-level predictors in a treatment-level data frame and use those to predict the sds ($\tau$ above).
 
 ```{r}
 set.seed(354855)
-N <- 1000
-N_pts <- floor(N / 3)
+N <- 500
+N_pts <- floor(N / 5)
 N_trts <- 10
 trt_intercept <- 0
 trt_x_b <- 1
@@ -79,14 +84,14 @@ trt_data <- data.frame(trt_x = rnorm(N_trts))
 trt_sd <- exp(trt_intercept + trt_x_b * trt_data$trt_x)
 ```
 
-Now we setup the patient-level random effects, with varying sds (corresponding to $\gamma$ above).
+Now, we setup the patient-level random effects, with varying sds (corresponding to $\gamma$ above).
 
 ```{r}
 patient_treatment <- sample(1:N_trts, size = N_pts, replace = TRUE)
 ranef <- rnorm(N_pts, mean = 0, sd = trt_sd[patient_treatment])
 ```
 
-Now we setup the main data frame showing multiple observations of each patient.
+Finally, we setup the main data frame with multiple observations of each patient.
 
 ```{r}
 intercept <- 1
@@ -105,10 +110,10 @@ base_data$y <- rnorm(N, mean = base_data_predictor , sd = obs_sigma)
 ## Implement the model
 
 The first problem to solve is that at its core, `brms` requires us to use a single data
-frame as input, but we have a treatment-level data frame and then an observation-level 
+frame as input. But we have a treatment-level data frame and then an observation-level 
 data frame. We get around this by adding dummy values so that both data 
-frames have the same column, binding the together and then using the `subset`
-addition term use different formulas for each. We will also need a dummy outcome
+frames have the same columns, binding the together and then using the `subset`
+addition term to use different formulas for each. We will also need a dummy outcome
 variable for the treatment-level data.
 
 ```{r}
@@ -132,7 +137,7 @@ combined_data <- rbind(
 
 The main idea for implementation is that we completely overtake the machinery of `brms` after
 the linear predictors are constructed. To do that, we create a custom family
-that is empty (i.e. adds nothing to the log likelihood) and use it.
+that is empty (i.e. adds nothing to the log likelihood) and use it in our formula.
 
 ```{r}
 # Build the empty families --- one has just a single parameter and will be used 
@@ -140,7 +145,7 @@ that is empty (i.e. adds nothing to the log likelihood) and use it.
 # for the observation model.
 empty_for_trt <- custom_family("empty_for_trt", type = "real")
 empty_for_obs <- custom_family("empty_for_obs",  dpars = c("mu", "sigma"), 
-                               links = c("identity", "log"), type = "real")
+                               links = c("identity", "log"), type = "real", lb = c(NA, 0))
 
 empty_func_stanvar <- stanvar(block = "functions", scode = "
   real empty_for_trt_lpdf(real y, real mu) {
@@ -172,7 +177,8 @@ f <- mvbrmsformula(
 ```
 
 
-In this setup, `brms` will build a bunch of variables for both formulas.
+In this setup, `brms` will build a bunch of variables for both formulas
+that we can access in our Stan code.
 Their names will depend on the name of the outcome variables --- since our
 main outcome is `y`, relevant variables will be `N_y` (number of rows
 for this outcome), `mu_y` and `sigma_y` (distributional parameters for this outcome).
@@ -181,7 +187,7 @@ Our dummy outcome is `trt_y` and the relevant variables will be `N_trty` and `mu
 because `brms` removes underscores. You can always use `make_stancode` and
 `make_standata` to see how `brms` transforms names and input data.
 
-For all this to happen we also need to pass a bunch of extra data.
+For all this to happen we also need to pass a bunch of extra data via `stanvars`.
 
 Let us prepare the extra Stan code.
 
@@ -190,6 +196,7 @@ Let us prepare the extra Stan code.
 # variables defined by brms, these include:
 # N_y - the number of observation-level data 
 # N_trty - the number of treatment-level data (and thus the number of treatments)
+# we however need to pass the rest of the data for the random effect
 data_stanvars <- 
   stanvar(x = N_pts, block = "data", scode = "int<lower=2> N_pts;") +
   stanvar(x = patient_treatment, name = "trt_id", block = "data", 
@@ -203,7 +210,7 @@ parameter_stanvar <-
       vector[N_pts] my_ranef_raw;
       ")
 
-# Prior - we are using non-centered parametrization, so it is just N(0,1)
+# Prior - we are using the non-centered parametrization, so it is just N(0,1)
 # and we multiply by the sd later.
 # Note that current versions of brms compute log-prior in the transformed
 # parameters block, so we do it as well.
@@ -245,35 +252,329 @@ make_stancode(f, data = combined_data,
   stanvars = predict_ranef_stanvars)
 ```
 
-
-```{r, include=FALSE}
-dd <- make_standata(  
-  f, 
-  data = combined_data,
-  stanvars = predict_ranef_stanvars)
-
-dd$N_y
-```
-
-
 Now, we can compile and fit the model:
 
 ```{r}
 fit <- brm(  
   f, 
   data = combined_data,
-  stanvars = predict_ranef_stanvars)
+  stanvars = predict_ranef_stanvars,
+  file = file.path(cache_dir, "fit.rds"),
+  file_refit = "on_change")
 ```
 
-
+We get a decent recovery of the parameters --- recall that we simulated data with
+`y_Intercept` = `r intercept`, `trty_Intercept` = `r trt_intercept`, `y_x` = `r x_b`,
+`trty_trt_x` = `r trt_x_b` and `sigma_y` = `r obs_sigma`.
 
 ```{r}
 summary(fit)
 ```
 
+Unfortunately, the code above is somewhat fragile. Notably, if we add a predictor
+for the standard deviation of the observations, then `sigma_y` in the Stan code
+won't be a scalar, but a vector and we'll need to adjust the Stan code a little bit.
+
+## Using the fitted model
+
+Since we overtook so much of `brms` machinery, things like `posterior_predict()`, 
+ `posterior_epred()` and `log_lik()` won't work out of the box and we need a little extra work to
+get them, mirroring the extra steps we did in the Stan code.
+
+Luckily for us `brms` exposes the [`prepare_predictions()`](http://paul-buerkner.github.io/brms/reference/prepare_predictions.html)
+and [`get_dpar()`](http://paul-buerkner.github.io/brms/reference/get_dpar.html) functions
+which do most of the heavy lifting. Let's start with mimicking `posterior_epred()` 
+
+```{r}
+pred_trt <- prepare_predictions(fit, resp = "trty")
+# A matrix of 4000 draws per 10 treatments
+samples_trt_mu <- brms::get_dpar(pred_trt, "mu")
+
+pred_y <- prepare_predictions(fit, resp = "y")
+# A matrix of 4000 draws per 500 observations
+samples_mu <- brms::get_dpar(pred_y, "mu") 
+
+# the ranef samples need to be taken directly from the Stan fit
+# A matrix of 4000 draws per 100 patients
+samples_ranef_raw <- posterior::as_draws_matrix(fit$fit) %>% 
+  posterior::subset_draws(variable = "my_ranef_raw")
+
+samples_sigma_per_patient <- exp(samples_trt_mu)[, patient_treatment]
+samples_ranef <- samples_ranef_raw * samples_sigma_per_patient
+samples_ranef_per_obs <- samples_ranef[, base_data$patient_id]
+samples_epred <- samples_mu + samples_ranef_per_obs 
+```
+
+And once we have the predictions for `mu` we can combine them with samples
+for `sigma` to get predictions including the observation noise and continue
+to do a posterior predictive check (which looks good).
+
+```{r ppc}
+# A vector of 4000 draws
+samples_sigma <- brms::get_dpar(pred_y, "sigma") 
 
 
-If you encounter problems running the models that you can't resolve yourself, be
+pred_y <- matrix(nrow = nrow(samples_epred), ncol = ncol(samples_epred))
+for(j in 1:ncol(samples_epred)) {
+  pred_y[,j] <- rnorm(nrow(samples_epred), 
+                      mean = samples_epred[,j], 
+                      sd = samples_sigma)
+}
+
+bayesplot::ppc_dens_overlay(base_data$y, pred_y[sample.int(4000, size = 30),])
+
+```
+
+## Summary
+
+So yay, we can use `brms` for the core of our model and then extend it to 
+cover predictors for the standard deviation of random effects. Unfortunately,
+it requires quite a bit of extra work.
+Using this heavy machinery for such a simple model as we did in this quick
+example is probably an overkill
+and you would be better off just implementing the whole thing in Stan. But if your 
+current `brms` model is quite complex and the only extra thing you need are the
+sd predictors, then the cost-benefit considerations might be quite different.
+
+The techniques we used to hack around `brms` are also very general, note that
+we have shown how to:
+
+- Combine multiple datasets of different sizes/shapes in a single model
+- Replace likelihood with arbitrary Stan code
+
+Together this is enough to use `brms`-style predictors in connection with 
+basically any type of model.
+For example, these tricks power my implementation of hidden Markov models with `brms` 
+discussed at https://discourse.mc-stan.org/t/fitting-hmms-with-time-varying-transition-matrices-using-brms-a-prototype/19645/7 .
+
+## Appendix: Check with SBC
+
+Recovering parameters from a single simulation and a nice posterior predictive
+check are good starting points but far from a guarantee that we implemented the
+model correctly. To be sure, we'll check with SBC --- if you are not familiar,
+SBC is a method that can discover almost all implementation problems  in your model
+by repeatedly fitting simulated data.
+We'll use the [`SBC` R package](https://hyunjimoon.github.io/SBC) and won't
+explain all the details here --- check the [Getting started](https://hyunjimoon.github.io/SBC/articles/SBC.html) and [SBC for `brms`](https://hyunjimoon.github.io/SBC/articles/brms.html) vignettes for
+explanation of the main concepts and API.
+
+```{r}
+# Setting up SBC and paralellism
+library(SBC)
+future::plan(future::multisession)
+gamma_shape <- 14
+gamma_rate <- 4
+```
+
+
+To make the model work with SBC we make a couple tweaks. 
+First, we add the `0 + Intercept` term to avoid the default centering of predictors done by `brms`,
+second we add explicit priors for all parameters (as the simulations need to match
+those priors). We'll use $N(0,1)$ for most parameters except the intercept for
+random effect deviations ($\alpha^\prime$) where we'll use $N(1,1)$ to avoid very low 
+standard deviations which pose convergence problems. Similarly, very low observation sigma
+causes convergence problems (not completely sure why), so we'll use a $\Gamma(`r gamma_shape`, `r gamma_rate`)$ prior (roughly saying that a priori
+the standard deviation is unlikely to be less than `r round(qgamma(0.025, gamma_shape, gamma_rate), 1)` or
+more than `r round(qgamma(0.975, gamma_shape, gamma_rate), 1)` )
+
+```{r, message=FALSE, warning=FALSE}
+# f_sbc <- 
+#   mvbrmsformula(
+#     brmsformula(y | subset(!is_trt)  ~ 0 + Intercept + x, family = empty_for_obs),
+#     brmsformula(trt_y | subset(is_trt)  ~ 0 + Intercept + trt_x, family = empty_for_trt),
+#     rescor = FALSE)
+
+#get_prior(f_sbc, combined_data)
+
+priors <- c(
+  prior(normal(0,1), class = "b", resp = "trty"),
+  prior(normal(1,1), class = "b", coef = "Intercept", resp = "trty"),
+  prior(normal(0,1), class = "b", resp = "y"),
+  set_prior(paste0("gamma(", gamma_shape, ", ", gamma_rate, ")"), 
+            class = "sigma", resp = "y")
+)
+
+# Function to generate a single simulated dataset
+# Note: we reuse N_trts, N, N_pts, patient_id and patient_treatment 
+# from the previous code to keep the data passed via stanvars fixed.
+generator_func <- function() {
+  trt_intercept <- rnorm(1, mean = 1)
+  trt_x_b <- rnorm(1)
+  # Centering predictors to match brms
+  trt_x_b <- trt_x_b - mean(trt_x_b)
+
+  trt_data <- data.frame(trt_x = rnorm(N_trts))
+  trt_sd <- exp(trt_intercept + trt_x_b * trt_data$trt_x)
+  
+  ranef_raw <- rnorm(N_pts)
+  ranef <- ranef_raw * trt_sd[patient_treatment]
+  
+  intercept <- rnorm(1)
+  x_b <- rnorm(1)
+  x_b <- x_b - mean(x_b)
+  obs_sigma <- rgamma(1, gamma_shape, gamma_rate)
+  
+  obs_data <- data.frame(x = rnorm(N), 
+                          patient_id = base_data$patient_id)
+  
+  obs_data$trt_id <- patient_treatment[obs_data$patient_id]
+  
+  obs_data_predictor <- intercept + x_b * obs_data$x + ranef[obs_data$patient_id]
+  obs_data$y <- rnorm(N, mean = obs_data_predictor , sd = obs_sigma)
+  
+  combined_data <- rbind(
+    obs_data %>% mutate(
+      is_trt = FALSE,
+      trt_x = 0,
+      trt_y = 0
+    ),
+    trt_data %>% mutate(
+      is_trt = TRUE,
+      trt_id = 0,
+      patient_id = 0,
+      y = 0,
+      x = 0,
+      trt_y = 0
+    )
+  )
+  
+  list(generated = combined_data,
+       variables = list(
+         b_y_Intercept = intercept,
+         b_y_x = x_b,
+         b_trty_Intercept = trt_intercept,
+         b_trty_trt_x = trt_x_b,
+         sigma_y = obs_sigma,
+         my_ranef_raw = ranef_raw
+       ))
+}
+
+# Generate a lot of datsets
+set.seed(33214855)
+N_sims <- 20
+ds <- generate_datasets(SBC_generator_function(generator_func), n_sims = N_sims)
+
+# With 500 datasets, this takes ~30 minutes on my computer
+backend <-
+  SBC_backend_brms(f,
+                   stanvars = predict_ranef_stanvars,
+                   prior = priors,
+                   template_data = combined_data,
+                   chains = 2,
+                   out_stan_file = file.path(cache_dir, "backend.stan")
+                   )
+```
+
+
+To increase the power of SBC to detect problems, we will also add the 
+log-likelihood and log-prior as derived quantities (see [Modrák et al. 2023](https://doi.org/10.1214/23-BA1404) 
+or the [limits of SBC](https://hyunjimoon.github.io/SBC/articles/limits_of_SBC.html) vignette for background on this). 
+
+```{r}
+compute_loglik <- function(y, is_trt, x, trt_x, patient_id, 
+                           trt_id, intercept, x_b, trt_intercept, trt_x_b, 
+                           ranef_raw, sigma_y) {
+  patient_id <- patient_id[!is_trt]
+  trt_id <- trt_id[!is_trt]
+  x <- x[!is_trt]
+  y <- y[!is_trt]
+  
+  trt_x <- trt_x[is_trt]
+  
+  patient_trt_all <- matrix(nrow = length(patient_id), ncol = 2)
+  patient_trt_all[,1] <- patient_id
+  patient_trt_all[,2] <- trt_id
+  patient_trt_all <- unique(patient_trt_all)
+
+  patient_treatment <- integer(max(patient_id))
+  patient_treatment[patient_trt_all[, 1]] <- patient_trt_all[, 2]
+  
+  ranef_sigma <- exp(trt_intercept + trt_x * trt_x_b)
+  ranef_vals <- ranef_raw * ranef_sigma[patient_treatment]
+  mu <- intercept + x * x_b + ranef_vals[patient_id]
+  sum(dnorm(y, mean = mu, sd = sigma_y, log = TRUE))  
+}
+
+
+dq <- derived_quantities(
+  lprior_fixed = dnorm(b_y_Intercept, log = TRUE) +
+    dnorm(b_y_x, log = TRUE) +
+    dnorm(b_trty_Intercept, mean = 1, log = TRUE) +
+    dnorm(b_trty_trt_x, log = TRUE) +
+    dgamma(sigma_y, gamma_shape, gamma_rate, log = TRUE),
+  loglik = compute_loglik(y = y, is_trt = is_trt, x = x, trt_x = trt_x,
+                          patient_id = patient_id, trt_id = trt_id,
+                          intercept = b_y_Intercept, x_b = b_y_x,
+                          trt_intercept = b_trty_Intercept, 
+                          trt_x_b = b_trty_trt_x, ranef_raw = my_ranef_raw,
+                          sigma = sigma_y),
+  .globals = c("compute_loglik", "gamma_shape", "gamma_rate")
+)
+```
+
+
+We are now ready to actually run SBC
+
+```{r}
+sbc_res <-
+  compute_SBC(
+    ds,
+    backend,
+    dquants = dq,
+    cache_mode = "results",
+    cache_location = file.path(cache_dir, paste0("sbc", N_sims, ".rds")),
+    keep_fits = N_sims <= 50
+  )
+```
+
+
+We plot the results of the [ECDF diff check](https://hyunjimoon.github.io/SBC/articles/rank_visualizations.html#plot_ecdf-and-plot_ecdf_diff---ecdf-plots) --- looking good!
+
+```{r sbc-ecdf}
+vars <- sbc_res$stats %>% filter(!grepl("my_", variable)) %>% 
+  pull(variable) %>% unique() %>% c("my_ranef_raw[1]", "my_ranef_raw[2]")
+plot_ecdf_diff(sbc_res, variables = vars)
+```
+
+We can also see how close to the true values our estimates are --- once again this looks
+quite good --- we do learn quite a lot of information about all parameters except for the 
+random effects!
+
+```{r sbc-sim-est}
+plot_sim_estimated(sbc_res, variables = vars, alpha = 0.1)
+```
+
+```{r}
+fit_to_test <- SBC_fit(backend, ds$generated[[303]], 4)
+```
+
+```{r}
+pairs(fit_to_test$fit, pars = vars[c(1:5, 8,9)])
+```
+
+```{r}
+ds$variables[210,]
+ds$generated[[210]] %>% filter(is_trt) %>% pull(trt_x) 
+ds$generated[[210]] %>% filter(is_trt) %>% pull(trt_x) %>% mean()
+```
+
+
+
+```{r}
+sbc_res$stats %>% filter(rhat < 1.5, rhat > 1.1
+                         )
+```
+
+
+```{r}
+#sbc_res$stats %>% filter(sim_id == 17, !grepl("my_", variable))
+sbc_res$stats %>% filter(!grepl("my_", variable)) %>% inner_join(sbc_res$default_diagnostics, by = "sim_id") %>%
+  #filter(max_rhat < 1.5) %>%
+  ggplot(aes(x = simulated_value, y = max_rhat)) + geom_point() + facet_wrap(~variable, scales = "free_x")
+```
+
+
+And that's all. If you encounter problems running the models that you can't resolve yourself, be
 sure to ask questions on [Stan Discourse](https://discourse.mc-stan.org) and tag
 me (@martinmodrak) in the question!
 
@@ -281,5 +582,11 @@ me (@martinmodrak) in the question!
 
 ```{r}
 sessionInfo()
+```
+
+Or alternatively, the `renv` lock file to run this:
+
+```{r, comment=""}
+cat(readLines("../../renv.lock"), sep = "\n")
 ```
 
