@@ -165,6 +165,32 @@
       ],
       "Hash": "a45594a00f5dbb073d5ec9f48592a08a"
     },
+    "SBC": {
+      "Package": "SBC",
+      "Version": "0.2.0.9000",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "hyunjimoon",
+      "RemoteRepo": "SBC",
+      "RemoteRef": "master",
+      "RemoteSha": "19709941abbe33961880ec0ae2c356e17d3dfb5e",
+      "Requirements": [
+        "R6",
+        "abind",
+        "dplyr",
+        "future.apply",
+        "ggplot2",
+        "memoise",
+        "posterior",
+        "purrr",
+        "stats",
+        "stringi",
+        "tidyr",
+        "tidyselect"
+      ],
+      "Hash": "3b92c1aa0a39de5f6c846e1718a0bb3d"
+    },
     "StanHeaders": {
       "Package": "StanHeaders",
       "Version": "2.32.5",
@@ -925,6 +951,20 @@
         "utils"
       ],
       "Hash": "e57e292737f7a4efa9d8a91c5908222c"
+    },
+    "future.apply": {
+      "Package": "future.apply",
+      "Version": "1.11.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "future",
+        "globals",
+        "parallel",
+        "utils"
+      ],
+      "Hash": "455e00c16ec193c8edcf1b2b522b3288"
     },
     "gargle": {
       "Package": "gargle",

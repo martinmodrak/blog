@@ -364,32 +364,30 @@ library(SBC)
 future::plan(future::multisession)
 gamma_shape <- 14
 gamma_rate <- 4
+trt_intercept_prior_mu <- 0.5
+trt_intercept_prior_sigma <- 0.5
 ```
 
 
-To make the model work with SBC we make a couple tweaks. 
-First, we add the `0 + Intercept` term to avoid the default centering of predictors done by `brms`,
-second we add explicit priors for all parameters (as the simulations need to match
+To make the model work with SBC we add explicit priors for all parameters (as the simulations need to match
 those priors). We'll use $N(0,1)$ for most parameters except the intercept for
-random effect deviations ($\alpha^\prime$) where we'll use $N(1,1)$ to avoid very low 
-standard deviations which pose convergence problems. Similarly, very low observation sigma
-causes convergence problems (not completely sure why), so we'll use a $\Gamma(`r gamma_shape`, `r gamma_rate`)$ prior (roughly saying that a priori
+random effect deviations ($\alpha^\prime$) where we'll use $N(`r trt_intercept_prior_mu`,`r trt_intercept_prior_sigma`)$ to avoid both very low 
+and very large standard deviations which pose convergence problems. Similarly, very low observation sigma
+causes convergence problems, so we'll use a $\Gamma(`r gamma_shape`, `r gamma_rate`)$ prior (roughly saying that a priori
 the standard deviation is unlikely to be less than `r round(qgamma(0.025, gamma_shape, gamma_rate), 1)` or
-more than `r round(qgamma(0.975, gamma_shape, gamma_rate), 1)` )
+more than `r round(qgamma(0.975, gamma_shape, gamma_rate), 1)` ). I did not investigate deeply
+to understand the convergence issues, so not completely sure about the mechanism.
 
 ```{r, message=FALSE, warning=FALSE}
-# f_sbc <- 
-#   mvbrmsformula(
-#     brmsformula(y | subset(!is_trt)  ~ 0 + Intercept + x, family = empty_for_obs),
-#     brmsformula(trt_y | subset(is_trt)  ~ 0 + Intercept + trt_x, family = empty_for_trt),
-#     rescor = FALSE)
-
-#get_prior(f_sbc, combined_data)
+get_prior(f, combined_data)
 
 priors <- c(
-  prior(normal(0,1), class = "b", resp = "trty"),
-  prior(normal(1,1), class = "b", coef = "Intercept", resp = "trty"),
-  prior(normal(0,1), class = "b", resp = "y"),
+  set_prior("normal(0,1)", class = "b", resp = "trty"),
+  set_prior(paste0("normal(",trt_intercept_prior_mu, ", ", 
+                   trt_intercept_prior_sigma, ")"), 
+            class = "Intercept", resp = "trty"),
+  set_prior("normal(0,1)", class = "b", resp = "y"),
+  set_prior("normal(0,1)", class = "Intercept", resp = "y"),
   set_prior(paste0("gamma(", gamma_shape, ", ", gamma_rate, ")"), 
             class = "sigma", resp = "y")
 )
@@ -398,12 +396,13 @@ priors <- c(
 # Note: we reuse N_trts, N, N_pts, patient_id and patient_treatment 
 # from the previous code to keep the data passed via stanvars fixed.
 generator_func <- function() {
-  trt_intercept <- rnorm(1, mean = 1)
+  trt_intercept <- rnorm(1, mean = trt_intercept_prior_mu, 
+                         sd = trt_intercept_prior_sigma)
   trt_x_b <- rnorm(1)
-  # Centering predictors to match brms
-  trt_x_b <- trt_x_b - mean(trt_x_b)
 
   trt_data <- data.frame(trt_x = rnorm(N_trts))
+  # Centering predictors to match brms
+  trt_data$trt_x <- trt_data$trt_x - mean(trt_data$trt_x)
   trt_sd <- exp(trt_intercept + trt_x_b * trt_data$trt_x)
   
   ranef_raw <- rnorm(N_pts)
@@ -411,12 +410,12 @@ generator_func <- function() {
   
   intercept <- rnorm(1)
   x_b <- rnorm(1)
-  x_b <- x_b - mean(x_b)
   obs_sigma <- rgamma(1, gamma_shape, gamma_rate)
   
   obs_data <- data.frame(x = rnorm(N), 
                           patient_id = base_data$patient_id)
   
+  obs_data$x <- obs_data$x - mean(obs_data$x)
   obs_data$trt_id <- patient_treatment[obs_data$patient_id]
   
   obs_data_predictor <- intercept + x_b * obs_data$x + ranef[obs_data$patient_id]
@@ -451,10 +450,10 @@ generator_func <- function() {
 
 # Generate a lot of datsets
 set.seed(33214855)
-N_sims <- 20
+N_sims <- 1000
 ds <- generate_datasets(SBC_generator_function(generator_func), n_sims = N_sims)
 
-# With 500 datasets, this takes ~30 minutes on my computer
+# With 1000 datasets, this takes ~45 minutes on my computer
 backend <-
   SBC_backend_brms(f,
                    stanvars = predict_ranef_stanvars,
@@ -499,7 +498,8 @@ compute_loglik <- function(y, is_trt, x, trt_x, patient_id,
 dq <- derived_quantities(
   lprior_fixed = dnorm(b_y_Intercept, log = TRUE) +
     dnorm(b_y_x, log = TRUE) +
-    dnorm(b_trty_Intercept, mean = 1, log = TRUE) +
+    dnorm(b_trty_Intercept, mean = trt_intercept_prior_mu, 
+          sd = trt_intercept_prior_sigma, log = TRUE) +
     dnorm(b_trty_trt_x, log = TRUE) +
     dgamma(sigma_y, gamma_shape, gamma_rate, log = TRUE),
   loglik = compute_loglik(y = y, is_trt = is_trt, x = x, trt_x = trt_x,
@@ -508,12 +508,13 @@ dq <- derived_quantities(
                           trt_intercept = b_trty_Intercept, 
                           trt_x_b = b_trty_trt_x, ranef_raw = my_ranef_raw,
                           sigma = sigma_y),
-  .globals = c("compute_loglik", "gamma_shape", "gamma_rate")
+  .globals = c("compute_loglik", "gamma_shape", "gamma_rate",
+               "trt_intercept_prior_mu", "trt_intercept_prior_sigma")
 )
 ```
 
 
-We are now ready to actually run SBC
+We are now ready to actually run SBC:
 
 ```{r}
 sbc_res <-
@@ -527,52 +528,43 @@ sbc_res <-
   )
 ```
 
+There are still some convergence problems for some fits --- the most worrying are 
+the high Rhats, affecting almost a third of the fits. This should definitely
+warrant some further investigation, but the Rhats are not very large and this 
+is a blog post, not a research paper,
+so we will not go down this rabbit hole.
+
+A very small number of fits had divergences/treedepth issues, but due to the small
+number, those are not so worrying. The steps rejected is completely benign
+as this includes rejections during warmup.
+
+Overall, it is in fact safe to just ignore the problematic fits as long as 
+you would not use results from such fits in actual practice (which you shouldn't) ---
+see the [rejection sampling](https://hyunjimoon.github.io/SBC/articles/rejection_sampling.html) vignette for more details.
 
 We plot the results of the [ECDF diff check](https://hyunjimoon.github.io/SBC/articles/rank_visualizations.html#plot_ecdf-and-plot_ecdf_diff---ecdf-plots) --- looking good!
+
 
 ```{r sbc-ecdf}
 vars <- sbc_res$stats %>% filter(!grepl("my_", variable)) %>% 
   pull(variable) %>% unique() %>% c("my_ranef_raw[1]", "my_ranef_raw[2]")
-plot_ecdf_diff(sbc_res, variables = vars)
+
+excluded_fits <- sbc_res$backend_diagnostics$n_divergent > 0 |
+  sbc_res$backend_diagnostics$n_max_treedepth > 0 |
+  sbc_res$default_diagnostics$min_ess_tail < 200 |
+  sbc_res$default_diagnostics$max_rhat > 1.01
+sbc_res_filtered <- sbc_res[!excluded_fits]
+plot_ecdf_diff(sbc_res_filtered, variables = vars)
 ```
+
 
 We can also see how close to the true values our estimates are --- once again this looks
 quite good --- we do learn quite a lot of information about all parameters except for the 
 random effects!
 
 ```{r sbc-sim-est}
-plot_sim_estimated(sbc_res, variables = vars, alpha = 0.1)
+plot_sim_estimated(sbc_res_filtered, variables = vars, alpha = 0.1)
 ```
-
-```{r}
-fit_to_test <- SBC_fit(backend, ds$generated[[303]], 4)
-```
-
-```{r}
-pairs(fit_to_test$fit, pars = vars[c(1:5, 8,9)])
-```
-
-```{r}
-ds$variables[210,]
-ds$generated[[210]] %>% filter(is_trt) %>% pull(trt_x) 
-ds$generated[[210]] %>% filter(is_trt) %>% pull(trt_x) %>% mean()
-```
-
-
-
-```{r}
-sbc_res$stats %>% filter(rhat < 1.5, rhat > 1.1
-                         )
-```
-
-
-```{r}
-#sbc_res$stats %>% filter(sim_id == 17, !grepl("my_", variable))
-sbc_res$stats %>% filter(!grepl("my_", variable)) %>% inner_join(sbc_res$default_diagnostics, by = "sim_id") %>%
-  #filter(max_rhat < 1.5) %>%
-  ggplot(aes(x = simulated_value, y = max_rhat)) + geom_point() + facet_wrap(~variable, scales = "free_x")
-```
-
 
 And that's all. If you encounter problems running the models that you can't resolve yourself, be
 sure to ask questions on [Stan Discourse](https://discourse.mc-stan.org) and tag
@@ -580,13 +572,14 @@ me (@martinmodrak) in the question!
 
 ## Original computing environment 
 
-```{r}
-sessionInfo()
+```{r, cache=FALSE}
+git_rev <- tryCatch({system("git rev-parse HEAD", intern=TRUE)}, error = function(e) {"Could not read Git revision"})
 ```
 
-Or alternatively, the `renv` lock file to run this:
+This post was built from Git revision `[`r git_rev`](https://github.com/martinmodrak/blog/tree/`r git_rev`)`, you can download the [`renv.lock`](https://github.com/martinmodrak/blog/blob/`r git_rev`/renv.lock) file required to reconstruct the environment.
 
-```{r, comment=""}
-cat(readLines("../../renv.lock"), sep = "\n")
+
+```{r}
+sessionInfo()
 ```
 
