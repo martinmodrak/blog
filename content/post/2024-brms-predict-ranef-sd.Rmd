@@ -1,7 +1,6 @@
 ---
 title: "Brms hacking: linear predictors for random effect standard deviations"
 date: 2024-02-17
-draft: true
 tags: ["R","Stan","brms", "random effects"]
 ---
 
