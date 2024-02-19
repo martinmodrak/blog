@@ -572,11 +572,11 @@ me (@martinmodrak) in the question!
 
 ## Original computing environment 
 
-```{r, cache=FALSE}
+```{r, cache=FALSE, echo=FALSE}
 git_rev <- tryCatch({system("git rev-parse HEAD", intern=TRUE)}, error = function(e) {"Could not read Git revision"})
 ```
 
-This post was built from Git revision `[`r git_rev`](https://github.com/martinmodrak/blog/tree/`r git_rev`)`, you can download the [`renv.lock`](https://github.com/martinmodrak/blog/blob/`r git_rev`/renv.lock) file required to reconstruct the environment.
+This post was built from Git revision [``r git_rev``](https://github.com/martinmodrak/blog/tree/`r git_rev`), you can download the [`renv.lock`](https://github.com/martinmodrak/blog/blob/`r git_rev`/renv.lock) file required to reconstruct the environment.
 
 
 ```{r}
