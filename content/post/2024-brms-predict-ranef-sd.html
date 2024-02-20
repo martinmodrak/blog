@@ -22,14 +22,11 @@ y_i \sim N\left(\mu_i, \sigma \right) \\
 <p>Where <span class="math inline">\(x\)</span> is a vector of observation-level predictors while <span class="math inline">\(x^\prime\)</span> is a vector of treatment-level predictors.
 In between we have patients — each contributing a bunch of observations and the standard deviation of the
 patient-level random intercepts depends on our treatment-level predictors.</p>
+<p><strong>UPDATE:</strong> <em>Shortly after publishing this, Ven Popov noted <a href="https://discourse.mc-stan.org/t/brms-hacking-linear-predictors-for-random-effect-standard-deviations/34162/2?u=martinmodrak">on Stan forums</a> that this type of model is achievable with non-linear formulas, but without extra hacks. So I’ll add the non-linear formula approach below and keep the hacky approach as a lesson how to play with <code>brms</code>.</em></p>
 <p>Well, it is not completely impossible. Since <code>brms</code> is <em>immensely</em> hackable, you can
 actually make this work. This blogpost will discuss how to do this. This does not
 mean it is a good idea or that you <em>should</em> do it. I am just showing that it is
 possible and hopefully also showing some general ways to hack with <code>brms</code>.</p>
-<p>The main downside of my approach is that it forces you to completely override
-the likelihood and that you have to build the random effect with predicted sigma
-in hand-written Stan code. This may mean the benefits of <code>brms</code> are now too small and
-you might be better off building the whole thing directly in Stan.</p>
 <p>Also, this type of model is likely to be a bit data-hungry — you need to have
 enough observations per treatment and enough treatments to be able to estimate <span class="math inline">\(\tau\)</span>
 well enough to learn about its predictors.</p>
@@ -54,8 +51,6 @@ if(!dir.exists(cache_dir)) {
 <h2>Simulate data</h2>
 <p>Note that the way we have setup the model implies that patients are nested within treatments (i.e. that each patient only ever gets one treatment).
 Since each random effect can only have one prior distribution, this is the easiest way to make sense of the model.</p>
-<p><em>Note: Another interpretation of “predicting random effect sd” is that you take an <span class="math inline">\(N(0,1)\)</span> distributed random effect and then multiply it by a different value based on other predictors. It should be possible to achieve that with
-non-linear formulas in <code>brms</code> and this blog does not address this case</em>.</p>
 <p>First, we setup the treatment-level predictors in a treatment-level data frame and use those to predict the sds (<span class="math inline">\(\tau\)</span> above).</p>
 <pre class="r"><code>set.seed(354855)
 N &lt;- 500
@@ -81,8 +76,86 @@ base_data$trt_id &lt;- patient_treatment[base_data$patient_id]
 base_data_predictor &lt;- intercept + x_b * base_data$x + ranef[base_data$patient_id]
 base_data$y &lt;- rnorm(N, mean = base_data_predictor , sd = obs_sigma)</code></pre>
 </div>
-<div id="implement-the-model" class="section level2">
-<h2>Implement the model</h2>
+<div id="using-non-linear-formulas" class="section level2">
+<h2>Using non-linear formulas</h2>
+<p>As noted by Ven Popov, we can use <a href="https://paul-buerkner.github.io/brms/articles/brms_nonlinear.html">non-linear <code>brms</code> formulas</a> for this task.
+First, we extend the patient-level data with treatment level-data.</p>
+<pre class="r"><code>trt_with_id &lt;- trt_data %&gt;% mutate(trt_id = 1:n())
+data_joined &lt;- base_data %&gt;% inner_join(trt_with_id, by = &quot;trt_id&quot;)</code></pre>
+<p>Now, we create a patient-level random intercept, but fix its standard deviation
+to <span class="math inline">\(1\)</span>. We then create a linear predictor for the variance and multiply
+the “standardized” random intercept with exp-transformed value of the predictor,
+giving us a random intercept with the correct standard deviation.</p>
+<p>This is how the <code>brms</code> code looks like:</p>
+<pre class="r"><code># Fix the sd to 1
+prior_nl &lt;- prior(constant(1), class=&#39;sd&#39;, nlpar=&#39;patientintercept&#39;)
+
+
+fit_nl &lt;- brm(
+     # combine the main predictor with the random effect in a non-linear formula    
+  bf(y ~ muy + patientintercept * exp(logmysigma), 
+         # main linear predictor for y (additional predictors go here)
+         muy ~ x,                                  
+         # specify the random intercept
+         patientintercept ~ 0 + (1|patient_id),    
+         # linear predictor for log random effect sd 
+         # (additional predictors for sd go here)
+         logmysigma ~ trt_x,                       
+         nl = T),
+  prior = prior_nl,
+  data = data_joined,
+  file = file.path(cache_dir, &quot;fit_nl.rds&quot;),
+  file_refit = &quot;on_change&quot;
+)</code></pre>
+<p>We get a decent recovery of the parameters — recall that we simulated data with
+<code>muy_Intercept</code> = 1, <code>logmysigma_Intercept</code> = 0, <code>muy_x</code> = 0.5,
+<code>logmysigma_trt_x</code> = 1 and <code>sigma</code> = 1.</p>
+<pre class="r"><code>summary(fit_nl)</code></pre>
+<pre><code>##  Family: gaussian 
+##   Links: mu = identity; sigma = identity 
+## Formula: y ~ muy + patientintercept * exp(logmysigma) 
+##          muy ~ x
+##          patientintercept ~ 0 + (1 | patient_id)
+##          logmysigma ~ trt_x
+##    Data: data_joined (Number of observations: 500) 
+##   Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+##          total post-warmup draws = 4000
+## 
+## Group-Level Effects: 
+## ~patient_id (Number of levels: 100) 
+##                                Estimate Est.Error l-95% CI u-95% CI Rhat
+## sd(patientintercept_Intercept)     1.00      0.00     1.00     1.00   NA
+##                                Bulk_ESS Tail_ESS
+## sd(patientintercept_Intercept)       NA       NA
+## 
+## Population-Level Effects: 
+##                      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS
+## muy_Intercept            0.99      0.09     0.80     1.17 1.00     1066
+## muy_x                    0.54      0.05     0.45     0.64 1.00     5005
+## logmysigma_Intercept     0.17      0.12    -0.07     0.39 1.01      678
+## logmysigma_trt_x         0.92      0.10     0.74     1.13 1.01      401
+##                      Tail_ESS
+## muy_Intercept            1969
+## muy_x                    3006
+## logmysigma_Intercept     1188
+## logmysigma_trt_x          829
+## 
+## Family Specific Parameters: 
+##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+## sigma     0.96      0.03     0.90     1.03 1.00     3333     2669
+## 
+## Draws were sampled using sample(hmc). For each parameter, Bulk_ESS
+## and Tail_ESS are effective sample size measures, and Rhat is the potential
+## scale reduction factor on split chains (at convergence, Rhat = 1).</code></pre>
+</div>
+<div id="the-hackers-way" class="section level2">
+<h2>The hacker’s way</h2>
+<p>To keep the lessons for future, I am also including a more hacky approach,
+that in principle lets you do much more, but is a bit of an overkill here.
+The main downside of my approach is that it forces you to completely override
+the likelihood and that you have to build the random effect with predicted sigma
+in hand-written Stan code. This may mean the benefits of <code>brms</code> are now too small and
+you might be better off building the whole thing directly in Stan.</p>
 <p>The first problem to solve is that at its core, <code>brms</code> requires us to use a single data
 frame as input. But we have a treatment-level data frame and then an observation-level
 data frame. We get around this by adding dummy values so that both data
@@ -620,7 +693,7 @@ me (<span class="citation">@martinmodrak</span>) in the question!</p>
 </div>
 <div id="original-computing-environment" class="section level2">
 <h2>Original computing environment</h2>
-<p>This post was built from Git revision <a href="https://github.com/martinmodrak/blog/tree/d97ea8f3c14acea4efff7960625af293b18b15d0"><code>d97ea8f3c14acea4efff7960625af293b18b15d0</code></a>, you can download the <a href="https://github.com/martinmodrak/blog/blob/d97ea8f3c14acea4efff7960625af293b18b15d0/renv.lock"><code>renv.lock</code></a> file required to reconstruct the environment.</p>
+<p>This post was built from Git revision <a href="https://github.com/martinmodrak/blog/tree/c9ed4bf49cb0082db9ad33f42c00c964d158c3f9"><code>c9ed4bf49cb0082db9ad33f42c00c964d158c3f9</code></a>, you can download the <a href="https://github.com/martinmodrak/blog/blob/c9ed4bf49cb0082db9ad33f42c00c964d158c3f9/renv.lock"><code>renv.lock</code></a> file required to reconstruct the environment.</p>
 <pre class="r"><code>sessionInfo()</code></pre>
 <pre><code>## R version 4.3.2 (2023-10-31 ucrt)
 ## Platform: x86_64-w64-mingw32/x64 (64-bit)
