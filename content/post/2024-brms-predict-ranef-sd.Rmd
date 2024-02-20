@@ -25,15 +25,12 @@ In between we have patients --- each contributing a bunch of observations and th
 patient-level random intercepts depends on our treatment-level predictors.
 
 
+**UPDATE:** _Shortly after publishing this, Ven Popov noted [on Stan forums](https://discourse.mc-stan.org/t/brms-hacking-linear-predictors-for-random-effect-standard-deviations/34162/2?u=martinmodrak) that this type of model is achievable with non-linear formulas, but without extra hacks. So I'll add the non-linear formula approach below and keep the hacky approach as a lesson how to play with `brms`._
+
 Well, it is not completely impossible. Since `brms` is _immensely_ hackable, you can
 actually make this work. This blogpost will discuss how to do this. This does not
 mean it is a good idea or that you _should_ do it. I am just showing that it is 
 possible and hopefully also showing some general ways to hack with `brms`.
-
-The main downside of my approach is that it forces you to completely override
-the likelihood and that you have to build the random effect with predicted sigma
-in hand-written Stan code. This may mean the benefits of `brms` are now too small and 
-you might be better off building the whole thing directly in Stan.
 
 Also, this type of model is likely to be a bit data-hungry --- you need to have
 enough observations per treatment and enough treatments to be able to estimate $\tau$ 
@@ -65,9 +62,6 @@ if(!dir.exists(cache_dir)) {
 
 Note that the way we have setup the model implies that patients are nested within treatments (i.e. that each patient only ever gets one treatment). 
 Since each random effect can only have one prior distribution, this is the easiest way to make sense of the model.
-
-_Note: Another interpretation of "predicting random effect sd" is that you take an $N(0,1)$ distributed random effect and then multiply it by a different value based on other predictors. It should be possible to achieve that with
-non-linear formulas in `brms` and this blog does not address this case_.
 
 First, we setup the treatment-level predictors in a treatment-level data frame and use those to predict the sds ($\tau$ above).
 
@@ -106,7 +100,65 @@ base_data$y <- rnorm(N, mean = base_data_predictor , sd = obs_sigma)
 ```
 
 
-## Implement the model
+## Using non-linear formulas
+
+As noted by Ven Popov, we can use [non-linear `brms` formulas](https://paul-buerkner.github.io/brms/articles/brms_nonlinear.html) for this task. 
+First, we extend the patient-level data with treatment level-data.
+
+```{r}
+trt_with_id <- trt_data %>% mutate(trt_id = 1:n())
+data_joined <- base_data %>% inner_join(trt_with_id, by = "trt_id")
+```
+
+
+Now, we create a patient-level random intercept, but fix its standard deviation
+to $1$. We then create a linear predictor for the variance and multiply
+the "standardized" random intercept with exp-transformed value of the predictor,
+giving us a random intercept with the correct standard deviation.
+
+This is how the `brms` code looks like:
+
+```{r}
+# Fix the sd to 1
+prior_nl <- prior(constant(1), class='sd', nlpar='patientintercept')
+
+
+fit_nl <- brm(
+     # combine the main predictor with the random effect in a non-linear formula    
+  bf(y ~ muy + patientintercept * exp(logmysigma), 
+         # main linear predictor for y (additional predictors go here)
+         muy ~ x,                                  
+         # specify the random intercept
+         patientintercept ~ 0 + (1|patient_id),    
+         # linear predictor for log random effect sd 
+         # (additional predictors for sd go here)
+         logmysigma ~ trt_x,                       
+         nl = T),
+  prior = prior_nl,
+  data = data_joined,
+  file = file.path(cache_dir, "fit_nl.rds"),
+  file_refit = "on_change"
+)
+```
+
+We get a decent recovery of the parameters --- recall that we simulated data with
+`muy_Intercept` = `r intercept`, `logmysigma_Intercept` = `r trt_intercept`, `muy_x` = `r x_b`,
+`logmysigma_trt_x` = `r trt_x_b` and `sigma` = `r obs_sigma`.
+
+
+```{r}
+summary(fit_nl)
+```
+
+## The hacker's way
+
+To keep the lessons for future, I am also including a more hacky approach, 
+that in principle lets you do much more, but is a bit of an overkill here.
+The main downside of my approach is that it forces you to completely override
+the likelihood and that you have to build the random effect with predicted sigma
+in hand-written Stan code. This may mean the benefits of `brms` are now too small and 
+you might be better off building the whole thing directly in Stan.
+
 
 The first problem to solve is that at its core, `brms` requires us to use a single data
 frame as input. But we have a treatment-level data frame and then an observation-level 
