@@ -72,7 +72,7 @@ almost surely non-zero mean of the normal distribution, i.e.:
 
 $$
 \mathcal{M}_2: \mathbf{y} = \{y_1, ... , y_K\} \\
-y_i \sim \alpha + N(0, 1) \\
+y_i \sim N(\alpha, 1) \\
 \alpha \sim N(0,2)
 $$
 
@@ -578,6 +578,7 @@ calibration %>% group_by(null_true) %>%
 ```
 
 We see that in the case of observing `r N_calibration` values, this simple heuristic makes a potentially non-intuitive trade-off where low rates of wrongly claiming support for the intercept model, the maternal uncle of despair, are balanced by low rates of correctly finding strong support for the null model and by somewhat large rate of finding weak evidence in favor of the null model, even when this model was not used to simulate data. 
+
 
 This is just to illustrate the point made by Schad et al. that explicit calibration and decision analysis should be done in the context of a given experimental design and utility/cost of actual decisions. But wan can be safe in the knowledge that the poor null model is unlikely to suffer unjust rejections in this case.
 

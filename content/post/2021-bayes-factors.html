@@ -4,7 +4,6 @@ date: 2021-03-28
 tags: ["R","Stan","Bayes Factor"]
 ---
 
-<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
 <p>This post was inspired by a very interesting paper on Bayes factors:
@@ -57,7 +56,7 @@ a.k.a. <span class="math inline">\(\mathcal{M}_2\)</span> that posits that there
 almost surely non-zero mean of the normal distribution, i.e.:</p>
 <p><span class="math display">\[
 \mathcal{M}_2: \mathbf{y} = \{y_1, ... , y_K\} \\
-y_i \sim \alpha + N(0, 1) \\
+y_i \sim N(\alpha, 1) \\
 \alpha \sim N(0,2)
 \]</span></p>
 <p>The corresponding R code would be:</p>
@@ -107,8 +106,8 @@ res_brms %&gt;% table_format</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">brms</td>
-<td align="right">3.725066</td>
-<td align="right">0.7883628</td>
+<td align="right">3.898489</td>
+<td align="right">0.7958554</td>
 </tr>
 </tbody>
 </table>
@@ -116,13 +115,13 @@ res_brms %&gt;% table_format</code></pre>
 probabilities of the individual models <span class="math inline">\(P(\mathcal{M}_1)\)</span>, <span class="math inline">\(P(\mathcal{M}_2)\)</span> i.e.:</p>
 <p><span class="math display">\[
 P(\mathcal{M}_1 | \mathbf{y}) = \frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + BF_{22}P(\mathcal{M}_2)} = \\
- = 
+=
 \frac{BF_{12}P(\mathcal{M}_1)}{BF_{12}P(\mathcal{M}_1) + P(\mathcal{M}_2)}
 \]</span>
 Where <span class="math inline">\(BF_{22} = 1\)</span> is the Bayes factor of the intercept model, cruel queen of the damned, against itself.
 If the prior is uniform, i.e. <span class="math inline">\(P(\mathcal{M}_1) = P(\mathcal{M}_2)\)</span> - as is assumed by <code>brms</code> - the formula further simplifies to:</p>
 <p><span class="math display">\[
-P(\mathcal{M}_1 | \mathbf{y}) = 
+P(\mathcal{M}_1 | \mathbf{y}) =
 \frac{BF_{12}}{BF_{12} + 1}
 \]</span></p>
 <p>The Bayes factor might look a bit like a magic number, so let us demystify it with two
@@ -156,8 +155,8 @@ From the properties of multivariate normal we know that a sum of multivariate no
 is obtained by simply adding both means and covariance matrices together, i.e.:</p>
 <p><span class="math display">\[
 \mathcal{M}_2: \mathbf{y} \sim MVN(0, \mathbf{\Sigma}) \\
- \forall_{i \in \{1, .., K\}}\mathbf{\Sigma}_{i,i} = 5 \\
- \forall_{i \neq j \in \{1, .., K\}} \mathbf{\Sigma}_{i,j} = 4 
+\forall_{i \in \{1, .., K\}}\mathbf{\Sigma}_{i,i} = 5 \\
+\forall_{i \neq j \in \{1, .., K\}} \mathbf{\Sigma}_{i,j} = 4
 \]</span></p>
 <p>where <span class="math inline">\(\mathbf{\Sigma} = \mathbf{\Sigma_a} + \mathbf{\Sigma_e}\)</span>.
 With that we can compute the evidence for the intercept model, the harbinger of sorrow,
@@ -189,8 +188,8 @@ rbind(res_prior, res_brms) %&gt;% table_format</code></pre>
 </tr>
 <tr class="even">
 <td align="left">brms</td>
-<td align="right">3.725066</td>
-<td align="right">0.7883628</td>
+<td align="right">3.898489</td>
+<td align="right">0.7958554</td>
 </tr>
 </tbody>
 </table>
@@ -219,7 +218,7 @@ y_i \sim N(\mu, 1) \\
 \mu =
 \begin{cases}
 0  &amp; \mathrm{if} \quad z = 1 \\
-\alpha  &amp;  \mathrm{if} \quad z = 2 
+\alpha  &amp;  \mathrm{if} \quad z = 2
 \end{cases}
 \\
 \alpha \sim N(0,2)
@@ -232,8 +231,7 @@ which (as shown above) we can transform into a Bayes factor.</p>
 <p>Before showing how to do this in Stan, we can use JAGS to implement this model very directly,
 if not very efficiently:</p>
 <pre class="r"><code>suppressPackageStartupMessages(library(rjags))</code></pre>
-<pre><code>## Warning: package &#39;rjags&#39; was built under R version 4.0.4</code></pre>
-<pre><code>## Warning: package &#39;coda&#39; was built under R version 4.0.4</code></pre>
+<pre><code>## Warning: package &#39;rjags&#39; was built under R version 4.3.3</code></pre>
 <pre class="r"><code>data_list &lt;- list(
     y = y)
 
@@ -270,15 +268,15 @@ mcmc_samples &lt;- coda.samples(model, params_to_monitor, n.iter=10000, thin = 1
 alpha_array &lt;- cbind(mcmc_samples[[1]][, &quot;alpha&quot;], mcmc_samples[[2]][, &quot;alpha&quot;],
                      mcmc_samples[[3]][, &quot;alpha&quot;], mcmc_samples[[4]][, &quot;alpha&quot;])
 posterior::rhat(alpha_array)</code></pre>
-<pre><code>## [1] 0.9997451</code></pre>
+<pre><code>## [1] 1.000077</code></pre>
 <pre class="r"><code>posterior::ess_bulk(alpha_array)</code></pre>
-<pre><code>## [1] 3933.771</code></pre>
+<pre><code>## [1] 3863.46</code></pre>
 <pre class="r"><code>z_array &lt;- cbind(mcmc_samples[[1]][, &quot;z_0&quot;], mcmc_samples[[2]][, &quot;z_0&quot;],
                  mcmc_samples[[3]][, &quot;z_0&quot;], mcmc_samples[[4]][, &quot;z_0&quot;])
 posterior::rhat(z_array)</code></pre>
-<pre><code>## [1] 1.000557</code></pre>
+<pre><code>## [1] 1.0006</code></pre>
 <pre class="r"><code>posterior::ess_bulk(z_array)</code></pre>
-<pre><code>## [1] 4013.534</code></pre>
+<pre><code>## [1] 3885.038</code></pre>
 <p>Posterior probability of the data being from the null model (<span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y})\)</span>),
 is then simply the <span class="math inline">\(P(z = 1 | \mathbf{y}) = P(z_0 = 0 | \mathbf{y})\)</span> which can be
 directly extracted from the samples.</p>
@@ -298,8 +296,8 @@ rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">super_jags</td>
-<td align="right">3.950495</td>
-<td align="right">0.7980000</td>
+<td align="right">4.025126</td>
+<td align="right">0.8010000</td>
 </tr>
 <tr class="even">
 <td align="left">prior</td>
@@ -308,8 +306,8 @@ rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
 </tr>
 <tr class="odd">
 <td align="left">brms</td>
-<td align="right">3.725066</td>
-<td align="right">0.7883628</td>
+<td align="right">3.898489</td>
+<td align="right">0.7958554</td>
 </tr>
 </tbody>
 </table>
@@ -344,11 +342,10 @@ model {
     target += normal_lpdf(alpha | 0, 2);
 }</code></pre>
 <pre class="r"><code>super_model &lt;- cmdstan_model(&quot;2021-bayes-factors.stan&quot;)</code></pre>
-<pre><code>## Model executable is up to date!</code></pre>
 <p>But how do we get back to the value we are actually interested in, that is <span class="math inline">\(P(z = 1 | \mathbf{y})\)</span> when there no longer is any <span class="math inline">\(z\)</span>?</p>
 <p>We can use the Bayes rule and since <span class="math inline">\(z\)</span> and <span class="math inline">\(\alpha\)</span> are a-prior independent, we can assume <span class="math inline">\(P(z = 1 | \alpha) = P(z = 1) = \frac{1}{2}\)</span>. This gives:</p>
 <p><span class="math display">\[
-P(z = 1 | \mathbf{y}, \alpha) =\\ = \frac{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha)}{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha) + 
+P(z = 1 | \mathbf{y}, \alpha) =\\ = \frac{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha)}{P(z = 1 | \alpha) \times p(\mathbf{y} | z = 1, \alpha) +
 P(z = 2 | \alpha) \times p(\mathbf{y} | z = 2, \alpha)} = \\
 =\frac{\frac{1}{2} p(\mathbf{y} | z = 1)}{\frac{1}{2} p(\mathbf{y} | z = 1) + \frac{1}{2} p(\mathbf{y} | z = 2, \alpha)}
 \]</span></p>
@@ -361,22 +358,22 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
   data = list(K = length(y), y = y), refresh = 0, iter_sampling = 10000)</code></pre>
 <pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
 ## 
-## Chain 1 finished in 0.3 seconds.
-## Chain 2 finished in 0.4 seconds.
-## Chain 3 finished in 0.3 seconds.
-## Chain 4 finished in 0.3 seconds.
+## Chain 1 finished in 0.2 seconds.
+## Chain 2 finished in 0.2 seconds.
+## Chain 3 finished in 0.2 seconds.
+## Chain 4 finished in 0.2 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 0.4 seconds.
+## Mean chain execution time: 0.2 seconds.
 ## Total execution time: 0.5 seconds.</code></pre>
 <pre class="r"><code>fit_super$summary() %&gt;% table_format()</code></pre>
 <table>
 <colgroup>
 <col width="16%" />
 <col width="11%" />
+<col width="9%" />
 <col width="10%" />
-<col width="10%" />
-<col width="8%" />
+<col width="9%" />
 <col width="10%" />
 <col width="9%" />
 <col width="8%" />
@@ -400,34 +397,34 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 <tbody>
 <tr class="odd">
 <td align="left">lp__</td>
-<td align="right">-6.5500559</td>
-<td align="right">-6.3973750</td>
-<td align="right">0.8351213</td>
-<td align="right">0.777557</td>
-<td align="right">-8.143562</td>
-<td align="right">-5.702910</td>
-<td align="right">1.000295</td>
-<td align="right">11109.72</td>
-<td align="right">11929.15</td>
+<td align="right">-6.5647145</td>
+<td align="right">-6.413520</td>
+<td align="right">0.8560242</td>
+<td align="right">0.7920865</td>
+<td align="right">-8.172786</td>
+<td align="right">-5.703310</td>
+<td align="right">1.000226</td>
+<td align="right">11884.51</td>
+<td align="right">12754.16</td>
 </tr>
 <tr class="even">
 <td align="left">alpha</td>
-<td align="right">0.0162464</td>
-<td align="right">0.0981009</td>
-<td align="right">1.7726911</td>
-<td align="right">1.438439</td>
-<td align="right">-3.067508</td>
-<td align="right">2.972789</td>
-<td align="right">1.000240</td>
-<td align="right">10600.70</td>
-<td align="right">11100.30</td>
+<td align="right">0.0451469</td>
+<td align="right">0.107838</td>
+<td align="right">1.8003994</td>
+<td align="right">1.4684901</td>
+<td align="right">-3.065715</td>
+<td align="right">3.096134</td>
+<td align="right">1.000288</td>
+<td align="right">10828.78</td>
+<td align="right">11133.06</td>
 </tr>
 <tr class="odd">
 <td align="left">log_lik_null</td>
 <td align="right">-4.1307500</td>
-<td align="right">-4.1307500</td>
+<td align="right">-4.130750</td>
 <td align="right">0.0000000</td>
-<td align="right">0.000000</td>
+<td align="right">0.0000000</td>
 <td align="right">-4.130750</td>
 <td align="right">-4.130750</td>
 <td align="right">NA</td>
@@ -436,15 +433,15 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 </tr>
 <tr class="even">
 <td align="left">log_lik_intercept</td>
-<td align="right">-10.4013700</td>
-<td align="right">-5.9333600</td>
-<td align="right">10.4287565</td>
-<td align="right">2.733907</td>
-<td align="right">-31.625405</td>
-<td align="right">-4.040298</td>
-<td align="right">1.000229</td>
-<td align="right">11078.21</td>
-<td align="right">11884.79</td>
+<td align="right">-10.5769127</td>
+<td align="right">-5.998455</td>
+<td align="right">10.7784901</td>
+<td align="right">2.8328557</td>
+<td align="right">-31.988185</td>
+<td align="right">-4.041409</td>
+<td align="right">1.000279</td>
+<td align="right">11955.60</td>
+<td align="right">12891.58</td>
 </tr>
 </tbody>
 </table>
@@ -472,13 +469,13 @@ rbind(res_stan, res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre
 <tbody>
 <tr class="odd">
 <td align="left">super_stan</td>
-<td align="right">3.711144</td>
-<td align="right">0.7877373</td>
+<td align="right">3.748543</td>
+<td align="right">0.7894091</td>
 </tr>
 <tr class="even">
 <td align="left">super_jags</td>
-<td align="right">3.950495</td>
-<td align="right">0.7980000</td>
+<td align="right">4.025126</td>
+<td align="right">0.8010000</td>
 </tr>
 <tr class="odd">
 <td align="left">prior</td>
@@ -487,8 +484,8 @@ rbind(res_stan, res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre
 </tr>
 <tr class="even">
 <td align="left">brms</td>
-<td align="right">3.725066</td>
-<td align="right">0.7883628</td>
+<td align="right">3.898489</td>
+<td align="right">0.7958554</td>
 </tr>
 </tbody>
 </table>
@@ -660,6 +657,14 @@ If we do this, this is how our results look like based on whether the null is ac
             strong_intercept = mean(bf &lt;= 0.01), .groups = &quot;drop&quot;) %&gt;%
   table_format()</code></pre>
 <table>
+<colgroup>
+<col width="13%" />
+<col width="15%" />
+<col width="13%" />
+<col width="15%" />
+<col width="19%" />
+<col width="22%" />
+</colgroup>
 <thead>
 <tr class="header">
 <th align="left">null_true</th>
