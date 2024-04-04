@@ -1,5 +1,5 @@
 ---
-title: "Cross-validation - a fourth way to compute a Bayes factor"
+title: "Cross-validation --- a fourth way to compute a Bayes factor"
 date: 2024-03-23
 tags: ["R","Bayes Factor"]
 ---
@@ -45,7 +45,7 @@ $$
 
 Where "evidence" is exactly the prior density of the data after integrating out all the parameters. 
 
-Our models are simple enough that we can evaluate the evidence analytically - [the Three ways post](/2021/03/28/three-ways-to-compute-a-bayes-factor/#method-2-prior-predictive-density) has the math.
+Our models are simple enough that we can evaluate the evidence analytically --- [the Three ways post](/2021/03/28/three-ways-to-compute-a-bayes-factor/#method-2-prior-predictive-density) has the math.
 
 ```{r, echo=FALSE}
 prior_log_evidence_null <- sum(dnorm(y, mean = 0, sd = 1, log = TRUE))
@@ -56,7 +56,7 @@ bf_prior <- exp(prior_log_evidence_null - prior_log_evidence_intercept)
 ```
 
 
-For the given dataset we thus obtain $\log P(\mathbf{y} | \mathcal{M}_1) \simeq `r prior_log_evidence_null`$, $\log P(\mathbf{y} | \mathcal{M}_2) \simeq `r prior_log_evidence_intercept`$ and $BF_{12} \simeq `r bf_prior`$.
+For the given dataset we thus obtain $\log P(\mathbf{y} | \mathcal{M}_1) \simeq `r round(prior_log_evidence_null, 3)`$, $\log P(\mathbf{y} | \mathcal{M}_2) \simeq `r round(prior_log_evidence_intercept, 3)`$ and $BF_{12} \simeq `r round(bf_prior, 3)`$.
 
 ## Cross-validation and evidence
 
@@ -79,11 +79,15 @@ S^{\rm CV}_\mathcal{M} (\mathbf{y} ; J) = \frac{1}{{K \choose J}}
 s\bigl(\tilde{y}_{j}^{(t)} \;\big|\; y^{(t)}_{1:K-J}\bigr) 
 $$
 
-where $y^{(t)_i}$ is the $i$-the element of $t$-th combination of $J$ elements out of $K$ and $\tilde{y}^{(t)_i}$ is the $i$-the element of the complement of this combination. Finally, we express the logarithm of evidence as the sum of the cross-validation scores over all possible held-out dataset sizes:
+where $y^{(t)}_i$ is the $i$-the element of $t$-th combination of $J$ elements out of $K$ and $\tilde{y}^{(t)}_i$ is the $i$-the element of the complement of this combination. Finally, we express the logarithm of evidence as the sum of the cross-validation scores over all possible held-out dataset sizes:
 
 $$
 \log P(\mathbf{y} | \mathcal{M}) = \sum_{J=1}^{K} S^{\rm CV}_\mathcal{M} (\mathbf{y} ; J)
 $$
+
+Note that the formula above holds regardless of the specific way we choose to partition $\bf{y}$ into individual "data points". At one extreme, we can treat all the data as a single indivisible element --- we then have $K = 1$ and recover the formula for evidence as the prior predictive probability. We can partition by individual numerical values, but we can also partition by e.g. patients etc. 
+
+In all cases, we take the _joint_ likelihood $f_\mathcal{M}(\tilde{y}, \theta)$ to compute the expected log predictive density for each element of the partition. But for each cross-validation fold we then take the _average_ of those densities. So a finer partition will do "more averaging" and treat small subsets of data as independent, while a coarser partition will consider the joint dependencies in each element of the partition, and then do "less averaging".
 
 ## Computing the example
 
@@ -91,7 +95,7 @@ Let us start with the $\mathcal{M_2}$ model (intercept) as that's more interesti
 We will closely follow the formulae. Note that the posterior density $p(\alpha | \mathbf{y})$
 is available analytically and is normal (see the [wiki page](https://en.wikipedia.org/wiki/Normal_distribution#With_known_variance) for derivation).
 
-Since the posterior is normal and the observation is normal, than the integral for the log posterior density evaluates to a normal density value.
+Since the posterior is normal and the observation model is normal, the posterior predictive density is also normal. The posterior predictive mean is exactly the  posterior mean and posterior predictive variance is equal to the sum of observational and posterior variances.
 
 Putting it all together we compute
 $\frac{1}{J} \sum_{j=1}^{J} s\bigl(\tilde{y}_{j}^{(t)} \;\big|\; y^{(t)}_{1:K-J}\bigr)$ in the `cv_score_m2_single` function:
@@ -114,8 +118,9 @@ cv_score_m2_single <- function(observed, held_out) {
     post_mean <- prior_mean
     post_sd <- prior_sd
   }
+  posterior_pred_sd <- sqrt(post_sd^2 + obs_sd^2)
   log_score <- sum(dnorm(
-    held_out, mean = post_mean, sd = sqrt(post_sd^2 + obs_sd^2), log = TRUE))
+    held_out, mean = post_mean, sd = posterior_pred_sd, log = TRUE))
   return(log_score / length(held_out))
 } 
 ```
@@ -152,11 +157,12 @@ log_evidence_m2_cv(y)
 
 
 
-For the $\mathcal{M_1}$ (null) model, we can avoid all this looping the density of the held-out data does not depend on the data seen so far, so we have
+For the $\mathcal{M_1}$ (null) model, we can avoid all this looping because the density of the held-out data does not depend on the data seen so far, so we have
 
 $$
 s_1(\tilde{y} \mid \mathbf{y}) = \mathtt{normal\_lpdf}(\tilde{y} | 0, 1)
 $$
+
 where $\mathtt{normal\_lpdf}$ is the log of the density function of a normal distribution.
 Since the cross-validation is exhaustive, then each $y$ value is held-out the same number of times and since $S^{\rm{CV}}_\mathcal{M}$ is an average, we have
 
@@ -177,17 +183,20 @@ sum(dnorm(y, mean = 0, sd = 1, log = TRUE))
 
 Since we obtained the correct values for evidence, we also obtain the correct value for the Bayes factor.
 
+And interestingly, log Bayes factor is the difference of log-evidence, so it is in this sense an analog to the difference in log predictive density as reported for cross validation by e.g. the `loo` package.
+
+
 ## What does it mean?
 
-Some people claim that this connection is a justification for using Bayes factors. Since cross-validation (e.g. with `loo`) is among the strongest alternative approaches for model comparison, some even claim that if you accept cross-validation as valid you _must_ accept Bayes factors as valid. I am personally not very convinced --- as already mentioned by Fong & Holmes 2020 the cross-validation scheme we see here is pretty weird. Why would I want to include "leave-all-data out" or "leave-almost-all-data-out" in my cross-validation? 
+Some people claim that this connection is a justification for using Bayes factors. Some even claim that if you accept cross-validation as valid you _must_ accept Bayes factors as valid. I am personally not very convinced --- as already mentioned by Fong & Holmes 2020 the cross-validation scheme we see here is pretty weird. Why would I want to include "leave-all-data out" or "leave-almost-all-data-out" in my cross-validation? 
 
 I also agree with Aki Vehtari's [cross-validation FAQ](https://users.aalto.fi/~ave/CV-FAQ.html#valid) (which is great overall), that the cross-validation scheme you use should be chosen with an eye toward the predictive task you want to handle. If you have a hierarchical model and you expect to never see new groups (e.g. groups are states), leaving out a single observation can make sense. If on the other hand predicting for new groups is essential (e.g. groups are patients), leaving out whole groups is much more reasonable. There's no such flexibility in Bayes factors.
 
-You say you don't care about predictions? Well, I subscribe to the view that [everything is prediction](https://statmodeling.stat.columbia.edu/2024/01/10/prediction-isnt-everything-but-everything-is-prediction/) --- i.e. every inference task can be reframed as an equivalent prediction task. Do you want to select a model? Do you want to know the difference between groups? You are implicitly making predictions about future datasets. So I'd suggest you find the prediction task corresponding to your inference goals --- performing well in this task will lead to good inferenecs.
+You say you don't care about predictions? Well, I subscribe to the view that [everything is prediction](https://statmodeling.stat.columbia.edu/2024/01/10/prediction-isnt-everything-but-everything-is-prediction/) --- i.e. every inference task can be reframed as an equivalent prediction task. Do you want to select a model? Do you want to know the difference between groups? You are implicitly making predictions about future datasets. So I'd suggest you find the prediction task corresponding to your inference goals. Performing well in this task will lead to good inferences and this performance can be often well approximated with cross-validation.
 
 There are also practical considerations: as discussed in the [Three ways post](/2021/03/28/three-ways-to-compute-a-bayes-factor/), Bayes factors are hard to compute, depend heavily on the choice priors and are hard to interpret. To be fair, cross-validation can be shown to have some issues as the size of the dataset grows to infinity: you need to increase the proportion of held-out data as the data size increases to avoid those (see [Grona & Wagenmakers 2019](http://doi.org/10.1007/s42113-018-0011-7) and the response in [Vehtari et al. 2019](http://doi.org/10.1007/s42113-018-0020-6) for more on this). But I don't work with datasets that are effectively infinite...
 
-This does not mean that I believe Bayes factor are _never_ useful. I can still imagine scenarios where they may have some merit --- if you have two well-specified substantive models with tightly constrained priors (e.g. from previous measurements), you have tons of data and you check that you can compute Bayes factors accurately, then they might provide value. I just think almost nobody is dealing with such situations.
+This does not mean that I believe Bayes factor are _never_ useful. I can still imagine scenarios where they may have some merit --- if you have two well-specified substantive models with tightly constrained priors (e.g. from previous measurements), you have tons of data and you check that you can compute Bayes factors accurately, then they might provide value. I just think very few people are dealing with such situations.
 
 
 

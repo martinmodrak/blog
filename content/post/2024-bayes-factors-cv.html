@@ -1,0 +1,142 @@
+---
+title: "Cross-validation --- a fourth way to compute a Bayes factor"
+date: 2024-03-23
+tags: ["R","Bayes Factor"]
+---
+
+
+
+<p>In this post we’ll explore the link between Bayes factors and cross-validation as discussed in <a href="https://doi.org/10.1093/biomet/asz077">Fong &amp; Holmes 2020: On the marginal likelihood and cross-validation</a>.
+I’ll then argue why this is a reason to not trust Bayes factors too much. This is a followup to <a href="/2021/03/28/three-ways-to-compute-a-bayes-factor/">Three ways to compute a Bayes factor</a>, though I will repeat all the important bits here.</p>
+<p><strong>Note on notation:</strong> I tried to be consistent and use plain symbols (<span class="math inline">\(y_1, z, ...\)</span>)
+for variables, bold symbols (<span class="math inline">\(\mathbf{y}\)</span>) for vectors and matrices,
+<span class="math inline">\(P(A)\)</span> for the probability of event <span class="math inline">\(A\)</span> and <span class="math inline">\(p(y)\)</span> for the density of random variable.</p>
+<div id="example-models" class="section level2">
+<h2>Example models</h2>
+<p>To make things specific, we will use very simple models as examples (those are the same as in the <a href="/2021/03/28/three-ways-to-compute-a-bayes-factor/">Three ways post</a>). Our first model, <span class="math inline">\(\mathcal{M}_1\)</span> assumes that the <span class="math inline">\(K\)</span> data points are independent draws from a standard normal distribution, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_1 : \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim N(0,1)
+\]</span></p>
+<p>Our second model, <span class="math inline">\(\mathcal{M}_2\)</span> assumes that the mean of the normal distribution is a free parameter with a normal prior, i.e.:</p>
+<p><span class="math display">\[
+\mathcal{M}_2: \mathbf{y} = \{y_1, ... , y_K\} \\
+y_i \sim N(\alpha, 1) \\
+\alpha \sim N(0,2)
+\]</span></p>
+<p>Now, lets take a simple vector of values to evaluate the models against:</p>
+<pre class="r"><code>y &lt;- c(0.5,0.7, -0.4, 0.1)</code></pre>
+</div>
+<div id="bayes-factor-and-evidence" class="section level2">
+<h2>Bayes factor and evidence</h2>
+<p>One way to define Bayes factor is as the ratio of <em>evidence</em> i.e.:</p>
+<p><span class="math display">\[
+BF_{12} = \frac{P(\mathbf{y} | \mathcal{M}_1)}{P(\mathbf{y} | \mathcal{M}_2)}
+\]</span></p>
+<p>Where “evidence” is exactly the prior density of the data after integrating out all the parameters.</p>
+<p>Our models are simple enough that we can evaluate the evidence analytically — <a href="/2021/03/28/three-ways-to-compute-a-bayes-factor/#method-2-prior-predictive-density">the Three ways post</a> has the math.</p>
+<p>For the given dataset we thus obtain <span class="math inline">\(\log P(\mathbf{y} | \mathcal{M}_1) \simeq -4.131\)</span>, <span class="math inline">\(\log P(\mathbf{y} | \mathcal{M}_2) \simeq -5.452\)</span> and <span class="math inline">\(BF_{12} \simeq 3.748\)</span>.</p>
+</div>
+<div id="cross-validation-and-evidence" class="section level2">
+<h2>Cross-validation and evidence</h2>
+<p>One of the main results of <a href="https://doi.org/10.1093/biomet/asz077">Fong &amp; Holmes 2020</a>
+is that evidence is related to cross-validation (Proposition 2 in the paper).
+For this to hold, we need to score cross validation using the log posterior predictive density</p>
+<p><span class="math display">\[
+s_\mathcal{M}(\tilde{y} \mid \mathbf{y}) = \log \int f_\mathcal{M}(\tilde{y}, \theta) \,{\rm d} p(\theta \mid \mathbf{y}, \mathcal{M}) =
+\log \int_\Theta f_\mathcal{M}(\tilde{y}, \theta) p(\theta \mid \mathbf{y}, \mathcal{M})  \,{\rm d} \theta
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{\theta} \in \Theta\)</span> is the vector of all parameters of the model and <span class="math inline">\(f_\mathcal{M}(y, \theta)\)</span> is the likelihood of model <span class="math inline">\(\mathcal{M}\)</span> evaluated for data point <span class="math inline">\(y\)</span> and parameters <span class="math inline">\(\theta\)</span>. Note that this is the same score as used e.g. in the <a href="https://mc-stan.org/loo/"><code>loo</code> package</a> for Bayesian cross-validation.</p>
+<p>We can then define an exhaustive leave-<span class="math inline">\(J\)</span>-out cross-validation of model <span class="math inline">\(\mathcal{M}\)</span> with data <span class="math inline">\(\mathbf{y} = (y_1, ... , y_K)\)</span> as the average of the log predictive densities over all possible held-out dataset of size <span class="math inline">\(J\)</span>:</p>
+<p><span class="math display">\[
+S^{\rm CV}_\mathcal{M} (\mathbf{y} ; J) = \frac{1}{{K \choose J}}
+\sum_{t=1}^{{K \choose J }} \frac{1}{J} \sum_{j=1}^{J}
+s\bigl(\tilde{y}_{j}^{(t)} \;\big|\; y^{(t)}_{1:K-J}\bigr)
+\]</span></p>
+<p>where <span class="math inline">\(y^{(t)}_i\)</span> is the <span class="math inline">\(i\)</span>-the element of <span class="math inline">\(t\)</span>-th combination of <span class="math inline">\(J\)</span> elements out of <span class="math inline">\(K\)</span> and <span class="math inline">\(\tilde{y}^{(t)}_i\)</span> is the <span class="math inline">\(i\)</span>-the element of the complement of this combination. Finally, we express the logarithm of evidence as the sum of the cross-validation scores over all possible held-out dataset sizes:</p>
+<p><span class="math display">\[
+\log P(\mathbf{y} | \mathcal{M}) = \sum_{J=1}^{K} S^{\rm CV}_\mathcal{M} (\mathbf{y} ; J)
+\]</span></p>
+<p>Note that the formula above holds regardless of the specific way we choose to partition <span class="math inline">\(\bf{y}\)</span> into individual “data points”. At one extreme, we can treat all the data as a single indivisible element — we then have <span class="math inline">\(K = 1\)</span> and recover the formula for evidence as the prior predictive probability. We can partition by individual numerical values, but we can also partition by e.g. patients etc.</p>
+<p>In all cases, we take the <em>joint</em> likelihood <span class="math inline">\(f_\mathcal{M}(\tilde{y}, \theta)\)</span> to compute the expected log predictive density for each element of the partition. But for each cross-validation fold we then take the <em>average</em> of those densities. So a finer partition will do “more averaging” and treat small subsets of data as independent, while a coarser partition will consider the joint dependencies in each element of the partition, and then do “less averaging”.</p>
+</div>
+<div id="computing-the-example" class="section level2">
+<h2>Computing the example</h2>
+<p>Let us start with the <span class="math inline">\(\mathcal{M_2}\)</span> model (intercept) as that’s more interesting.
+We will closely follow the formulae. Note that the posterior density <span class="math inline">\(p(\alpha | \mathbf{y})\)</span>
+is available analytically and is normal (see the <a href="https://en.wikipedia.org/wiki/Normal_distribution#With_known_variance">wiki page</a> for derivation).</p>
+<p>Since the posterior is normal and the observation model is normal, the posterior predictive density is also normal. The posterior predictive mean is exactly the posterior mean and posterior predictive variance is equal to the sum of observational and posterior variances.</p>
+<p>Putting it all together we compute
+<span class="math inline">\(\frac{1}{J} \sum_{j=1}^{J} s\bigl(\tilde{y}_{j}^{(t)} \;\big|\; y^{(t)}_{1:K-J}\bigr)\)</span> in the <code>cv_score_m2_single</code> function:</p>
+<pre class="r"><code>cv_score_m2_single &lt;- function(observed, held_out) {
+  prior_mean &lt;- 0
+  prior_sd &lt;- 2
+  obs_sd &lt;- 1
+  K &lt;- length(observed)
+  if(K &gt; 0) {
+    prior_precision &lt;- prior_sd ^ -2
+    obs_precision &lt;- obs_sd ^ -2
+    obs_mean &lt;- mean(observed)
+    post_precision &lt;- prior_precision + K * obs_precision
+    post_sd &lt;- sqrt(1/post_precision)
+    post_mean &lt;- (K * obs_precision * obs_mean + prior_precision * prior_mean) / 
+      post_precision
+  } else {
+    post_mean &lt;- prior_mean
+    post_sd &lt;- prior_sd
+  }
+  posterior_pred_sd &lt;- sqrt(post_sd^2 + obs_sd^2)
+  log_score &lt;- sum(dnorm(
+    held_out, mean = post_mean, sd = posterior_pred_sd, log = TRUE))
+  return(log_score / length(held_out))
+} </code></pre>
+<p>Now <code>cv_score_m2</code> loops over all possible combinations of size <span class="math inline">\(J\)</span> and <code>log_evidence_m2_cv</code> adds it all together:</p>
+<pre class="r"><code>cv_score_m2 &lt;- function(y, J) {
+  K &lt;- length(y)
+  combinations &lt;- combn(1:K, J)
+  res_unscaled &lt;- 0
+  for(t in 1:ncol(combinations)) {
+    held_out &lt;- y[combinations[,t]]
+    observed &lt;- y[setdiff(1:K, combinations[,t])]
+    res_unscaled &lt;- res_unscaled + cv_score_m2_single(observed, held_out)
+  }
+  return(res_unscaled / ncol(combinations))
+}
+
+log_evidence_m2_cv &lt;- function(y) {
+  res &lt;- 0
+  for(p in 1:length(y)) {
+    res &lt;- res + cv_score_m2(y, p)
+  }
+  return(res)
+}</code></pre>
+<p>We obtain a result that is identical to the direct computation of evidence:</p>
+<pre class="r"><code>log_evidence_m2_cv(y)</code></pre>
+<pre><code>## [1] -5.452067</code></pre>
+<p>For the <span class="math inline">\(\mathcal{M_1}\)</span> (null) model, we can avoid all this looping because the density of the held-out data does not depend on the data seen so far, so we have</p>
+<p><span class="math display">\[
+s_1(\tilde{y} \mid \mathbf{y}) = \mathtt{normal\_lpdf}(\tilde{y} | 0, 1)
+\]</span></p>
+<p>where <span class="math inline">\(\mathtt{normal\_lpdf}\)</span> is the log of the density function of a normal distribution.
+Since the cross-validation is exhaustive, then each <span class="math inline">\(y\)</span> value is held-out the same number of times and since <span class="math inline">\(S^{\rm{CV}}_\mathcal{M}\)</span> is an average, we have</p>
+<p><span class="math display">\[
+S^{\rm CV}_\mathcal{M} (\mathbf{y} ; J) = \frac{1}{J}\sum_{i = 1}^K \mathtt{normal\_lpdf}(y_i | 0, 1)
+\]</span>
+and the evidence thus is:</p>
+<p><span class="math display">\[
+\log P(\mathbf{y} | \mathcal{M}) = \sum_{i = 1}^n \mathtt{normal\_lpdf}(y_i | 0, 1)
+\]</span></p>
+<p>which happens to be exactly the same as the log prior predictive density and matches our expectations:</p>
+<pre class="r"><code>sum(dnorm(y, mean = 0, sd = 1, log = TRUE))</code></pre>
+<pre><code>## [1] -4.130754</code></pre>
+<p>Since we obtained the correct values for evidence, we also obtain the correct value for the Bayes factor.</p>
+<p>And interestingly, log Bayes factor is the difference of log-evidence, so it is in this sense an analog to the difference in log predictive density as reported for cross validation by e.g. the <code>loo</code> package.</p>
+</div>
+<div id="what-does-it-mean" class="section level2">
+<h2>What does it mean?</h2>
+<p>Some people claim that this connection is a justification for using Bayes factors. Some even claim that if you accept cross-validation as valid you <em>must</em> accept Bayes factors as valid. I am personally not very convinced — as already mentioned by Fong &amp; Holmes 2020 the cross-validation scheme we see here is pretty weird. Why would I want to include “leave-all-data out” or “leave-almost-all-data-out” in my cross-validation?</p>
+<p>I also agree with Aki Vehtari’s <a href="https://users.aalto.fi/~ave/CV-FAQ.html#valid">cross-validation FAQ</a> (which is great overall), that the cross-validation scheme you use should be chosen with an eye toward the predictive task you want to handle. If you have a hierarchical model and you expect to never see new groups (e.g. groups are states), leaving out a single observation can make sense. If on the other hand predicting for new groups is essential (e.g. groups are patients), leaving out whole groups is much more reasonable. There’s no such flexibility in Bayes factors.</p>
+<p>You say you don’t care about predictions? Well, I subscribe to the view that <a href="https://statmodeling.stat.columbia.edu/2024/01/10/prediction-isnt-everything-but-everything-is-prediction/">everything is prediction</a> — i.e. every inference task can be reframed as an equivalent prediction task. Do you want to select a model? Do you want to know the difference between groups? You are implicitly making predictions about future datasets. So I’d suggest you find the prediction task corresponding to your inference goals. Performing well in this task will lead to good inferences and this performance can be often well approximated with cross-validation.</p>
+<p>There are also practical considerations: as discussed in the <a href="/2021/03/28/three-ways-to-compute-a-bayes-factor/">Three ways post</a>, Bayes factors are hard to compute, depend heavily on the choice priors and are hard to interpret. To be fair, cross-validation can be shown to have some issues as the size of the dataset grows to infinity: you need to increase the proportion of held-out data as the data size increases to avoid those (see <a href="http://doi.org/10.1007/s42113-018-0011-7">Grona &amp; Wagenmakers 2019</a> and the response in <a href="http://doi.org/10.1007/s42113-018-0020-6">Vehtari et al. 2019</a> for more on this). But I don’t work with datasets that are effectively infinite…</p>
+<p>This does not mean that I believe Bayes factor are <em>never</em> useful. I can still imagine scenarios where they may have some merit — if you have two well-specified substantive models with tightly constrained priors (e.g. from previous measurements), you have tons of data and you check that you can compute Bayes factors accurately, then they might provide value. I just think very few people are dealing with such situations.</p>
+</div>
