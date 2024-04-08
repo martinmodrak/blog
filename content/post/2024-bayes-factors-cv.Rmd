@@ -1,10 +1,10 @@
 ---
-title: "Cross-validation --- a fourth way to compute a Bayes factor"
+title: "Cross-validation — a fourth way to compute a Bayes factor"
 date: 2024-03-23
 tags: ["R","Bayes Factor"]
 ---
 
-In this post we'll explore the link between Bayes factors and cross-validation as discussed in [Fong & Holmes 2020: On the marginal likelihood and cross-validation](https://doi.org/10.1093/biomet/asz077). 
+In this post we'll explore a particular link between Bayes factors and cross-validation I was introduced to via [Fong & Holmes 2020](https://doi.org/10.1093/biomet/asz077). 
 I'll then argue why this is a reason to not trust Bayes factors too much. This is a followup to [Three ways to compute a Bayes factor](/2021/03/28/three-ways-to-compute-a-bayes-factor/), though I will repeat all the important bits here.
 
 **Note on notation:** I tried to be consistent and use plain symbols ($y_1, z, ...$)
@@ -61,7 +61,7 @@ For the given dataset we thus obtain $\log P(\mathbf{y} | \mathcal{M}_1) \simeq 
 ## Cross-validation and evidence
 
 One of the main results of [Fong & Holmes 2020](https://doi.org/10.1093/biomet/asz077)
-is that evidence is related to cross-validation (Proposition 2 in the paper).
+is that evidence is related to cross-validation (Proposition 2 in the paper)^[There are also other ways to relate cross-validation to Bayes factors as discussed e.g. in section 6.1.6 of [Bernardo & Smith (1994)](https://isbnsearch.org/isbn/047149464X), but those are not the focus of this post.].
 For this to hold, we need to score cross validation using the log posterior predictive density
 
 $$
@@ -89,9 +89,11 @@ Note that the formula above holds regardless of the specific way we choose to pa
 
 In all cases, we take the _joint_ likelihood $f_\mathcal{M}(\tilde{y}, \theta)$ to compute the expected log predictive density for each element of the partition. But for each cross-validation fold we then take the _average_ of those densities. So a finer partition will do "more averaging" and treat small subsets of data as independent, while a coarser partition will consider the joint dependencies in each element of the partition, and then do "less averaging".
 
+Finally, the above formula is in most cases ridiculously impractical for actual computation and is therefore primarily of theoretical interest.
+
 ## Computing the example
 
-Let us start with the $\mathcal{M_2}$ model (intercept) as that's more interesting. 
+Let's explore how the formula works in code and us start with the $\mathcal{M_2}$ model (intercept) as that's more interesting. 
 We will closely follow the formulae. Note that the posterior density $p(\alpha | \mathbf{y})$
 is available analytically and is normal (see the [wiki page](https://en.wikipedia.org/wiki/Normal_distribution#With_known_variance) for derivation).
 

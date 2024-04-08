@@ -268,15 +268,15 @@ mcmc_samples &lt;- coda.samples(model, params_to_monitor, n.iter=10000, thin = 1
 alpha_array &lt;- cbind(mcmc_samples[[1]][, &quot;alpha&quot;], mcmc_samples[[2]][, &quot;alpha&quot;],
                      mcmc_samples[[3]][, &quot;alpha&quot;], mcmc_samples[[4]][, &quot;alpha&quot;])
 posterior::rhat(alpha_array)</code></pre>
-<pre><code>## [1] 1.000077</code></pre>
+<pre><code>## [1] 1.00007</code></pre>
 <pre class="r"><code>posterior::ess_bulk(alpha_array)</code></pre>
-<pre><code>## [1] 3863.46</code></pre>
+<pre><code>## [1] 3802.998</code></pre>
 <pre class="r"><code>z_array &lt;- cbind(mcmc_samples[[1]][, &quot;z_0&quot;], mcmc_samples[[2]][, &quot;z_0&quot;],
                  mcmc_samples[[3]][, &quot;z_0&quot;], mcmc_samples[[4]][, &quot;z_0&quot;])
 posterior::rhat(z_array)</code></pre>
-<pre><code>## [1] 1.0006</code></pre>
+<pre><code>## [1] 1.000246</code></pre>
 <pre class="r"><code>posterior::ess_bulk(z_array)</code></pre>
-<pre><code>## [1] 3885.038</code></pre>
+<pre><code>## [1] 3962.832</code></pre>
 <p>Posterior probability of the data being from the null model (<span class="math inline">\(P(\mathcal{M}_1 | \mathbf{y})\)</span>),
 is then simply the <span class="math inline">\(P(z = 1 | \mathbf{y}) = P(z_0 = 0 | \mathbf{y})\)</span> which can be
 directly extracted from the samples.</p>
@@ -296,8 +296,8 @@ rbind(res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre>
 <tbody>
 <tr class="odd">
 <td align="left">super_jags</td>
-<td align="right">4.025126</td>
-<td align="right">0.8010000</td>
+<td align="right">3.711425</td>
+<td align="right">0.7877500</td>
 </tr>
 <tr class="even">
 <td align="left">prior</td>
@@ -358,21 +358,21 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
   data = list(K = length(y), y = y), refresh = 0, iter_sampling = 10000)</code></pre>
 <pre><code>## Running MCMC with 4 chains, at most 12 in parallel...
 ## 
-## Chain 1 finished in 0.2 seconds.
-## Chain 2 finished in 0.2 seconds.
+## Chain 1 finished in 0.3 seconds.
+## Chain 2 finished in 0.3 seconds.
 ## Chain 3 finished in 0.2 seconds.
-## Chain 4 finished in 0.2 seconds.
+## Chain 4 finished in 0.3 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 0.2 seconds.
+## Mean chain execution time: 0.3 seconds.
 ## Total execution time: 0.5 seconds.</code></pre>
 <pre class="r"><code>fit_super$summary() %&gt;% table_format()</code></pre>
 <table>
 <colgroup>
 <col width="16%" />
 <col width="11%" />
-<col width="9%" />
 <col width="10%" />
+<col width="9%" />
 <col width="9%" />
 <col width="10%" />
 <col width="9%" />
@@ -397,33 +397,33 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 <tbody>
 <tr class="odd">
 <td align="left">lp__</td>
-<td align="right">-6.5647145</td>
-<td align="right">-6.413520</td>
-<td align="right">0.8560242</td>
-<td align="right">0.7920865</td>
-<td align="right">-8.172786</td>
-<td align="right">-5.703310</td>
-<td align="right">1.000226</td>
-<td align="right">11884.51</td>
-<td align="right">12754.16</td>
+<td align="right">-6.5619847</td>
+<td align="right">-6.4162500</td>
+<td align="right">0.847365</td>
+<td align="right">0.7940064</td>
+<td align="right">-8.159686</td>
+<td align="right">-5.703508</td>
+<td align="right">1.000154</td>
+<td align="right">11044.62</td>
+<td align="right">12052.58</td>
 </tr>
 <tr class="even">
 <td align="left">alpha</td>
-<td align="right">0.0451469</td>
-<td align="right">0.107838</td>
-<td align="right">1.8003994</td>
-<td align="right">1.4684901</td>
-<td align="right">-3.065715</td>
-<td align="right">3.096134</td>
-<td align="right">1.000288</td>
-<td align="right">10828.78</td>
-<td align="right">11133.06</td>
+<td align="right">0.0490804</td>
+<td align="right">0.0948292</td>
+<td align="right">1.793511</td>
+<td align="right">1.4701640</td>
+<td align="right">-3.034274</td>
+<td align="right">3.098635</td>
+<td align="right">1.000182</td>
+<td align="right">11120.88</td>
+<td align="right">11475.93</td>
 </tr>
 <tr class="odd">
 <td align="left">log_lik_null</td>
 <td align="right">-4.1307500</td>
-<td align="right">-4.130750</td>
-<td align="right">0.0000000</td>
+<td align="right">-4.1307500</td>
+<td align="right">0.000000</td>
 <td align="right">0.0000000</td>
 <td align="right">-4.130750</td>
 <td align="right">-4.130750</td>
@@ -433,15 +433,15 @@ P(z = 1 | \mathbf{y}) = \int P(z = 1 | \mathbf{y}, \alpha) \mathrm{d} \alpha \si
 </tr>
 <tr class="even">
 <td align="left">log_lik_intercept</td>
-<td align="right">-10.5769127</td>
-<td align="right">-5.998455</td>
-<td align="right">10.7784901</td>
-<td align="right">2.8328557</td>
-<td align="right">-31.988185</td>
-<td align="right">-4.041409</td>
-<td align="right">1.000279</td>
-<td align="right">11955.60</td>
-<td align="right">12891.58</td>
+<td align="right">-10.5246013</td>
+<td align="right">-6.0134100</td>
+<td align="right">10.546830</td>
+<td align="right">2.8471109</td>
+<td align="right">-32.070390</td>
+<td align="right">-4.041240</td>
+<td align="right">1.000103</td>
+<td align="right">10990.77</td>
+<td align="right">12359.95</td>
 </tr>
 </tbody>
 </table>
@@ -469,13 +469,13 @@ rbind(res_stan, res_jags, res_prior, res_brms) %&gt;% table_format()</code></pre
 <tbody>
 <tr class="odd">
 <td align="left">super_stan</td>
-<td align="right">3.748543</td>
-<td align="right">0.7894091</td>
+<td align="right">3.753493</td>
+<td align="right">0.7896284</td>
 </tr>
 <tr class="even">
 <td align="left">super_jags</td>
-<td align="right">4.025126</td>
-<td align="right">0.8010000</td>
+<td align="right">3.711425</td>
+<td align="right">0.7877500</td>
 </tr>
 <tr class="odd">
 <td align="left">prior</td>
@@ -701,4 +701,5 @@ If we do this, this is how our results look like based on whether the null is ac
 <h2>Conclusions</h2>
 <p>Bayes factors are not very intuitive, but I hope that understanding that the same number can be understood as either being a ratio of prior predictive densities or from a larger model taking the candidate models as components could help improve the intuition. In line with the (better, more thoroughly done) results of Schad et al. we also observe that computation of Bayes factors cannot be taken for granted and that simple heuristics to interpret Bayes factors may have non-obvious implications.</p>
 <p>Now go read <a href="https://arxiv.org/abs/2103.08744">Workflow Techniques for the Robust Use of Bayes Factors</a>!</p>
+<p><strong>UPDATE:</strong> I have a <a href="/2024/03/23/cross-validation-a-fourth-way-to-compute-a-bayes-factor/">followup post</a> discussing the connection between Bayes factors and cross-validation on the same examples.</p>
 </div>

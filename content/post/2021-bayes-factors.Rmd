@@ -588,3 +588,5 @@ Bayes factors are not very intuitive, but I hope that understanding that the sam
 
 Now go read [Workflow Techniques for the Robust Use of Bayes Factors](https://arxiv.org/abs/2103.08744)!
 
+**UPDATE:** I have a [followup post](/2024/03/23/cross-validation-a-fourth-way-to-compute-a-bayes-factor/) discussing the connection between Bayes factors and cross-validation on the same examples.
+
