@@ -1,0 +1,165 @@
+---
+title: "Tutorial tasks"
+format: 
+html
+---
+
+
+Setup your environment with:
+
+```{r}
+library(rstanarm)
+library(bayesplot)
+library(posterior)
+library(loo)
+data(epilepsy, package = "brms")
+```
+
+Optionally you can allow parallel computation with
+
+```{r, eval=FALSE}
+options(mc.cores = 4) 
+```
+
+
+Depending on your system specs this may not be beneficial for the simpler models.
+
+The example task from the slides is recreated with:
+
+```{r}
+fit_epi_poisson0 <- stan_glm(count ~ Trt, data = epilepsy,
+family = poisson("log"))
+
+summary(fit_epi_poisson0, probs = c(0.025,0.5,0.975))
+pp_check(fit_epi_poisson0)
+
+```
+
+```{r}
+fit_epi_negbin0 <- stan_glm.nb(count ~ Trt, data = epilepsy)
+summary(fit_epi_negbin0, probs = c(0.025,0.5,0.975))
+pp_check(fit_epi_negbin0)
+```
+
+LOO - this complains about problems with the Poisson model (because there are problems), but we ignore them for now, because we know, the model has other problems.
+
+```{r}
+loo_epi_poisson0 <- loo(fit_epi_poisson0)
+loo_epi_negbin0 <- loo(fit_epi_negbin0)
+loo_compare(loo_epi_poisson0, loo_epi_negbin0)
+
+```
+
+
+## Task 1
+
+We know the model is not working great, so let us split the baseline number
+of seizures into 4 groups
+
+```{r}
+Base_grouped <- cut(epilepsy$Base, 9)
+```
+
+
+The `plotfun` argument to `pp_check` lets use different types of checks.
+The `dens_overlay_grouped` check shows us the density plot, but grouped by
+some other factor. So to show the density check separately based on different baseline 
+seizure count we can run:
+
+```{r, eval=FALSE}
+pp_check(fit_epi_negbin0, plotfun = "dens_overlay_grouped", group = Base_grouped)
+```
+
+What is wrong with the model?
+
+Will the `visit` variable also show problems?
+
+```{r, include=FALSE}
+pp_check(fit_epi_negbin0, plotfun = "dens_overlay_grouped", group = epilepsy$visit)
+```
+
+
+## Task 2
+
+Let's add the baseline seizure count as a predictor and its interaction with treatment. It will help if we scale it. 
+
+
+```{r, eval=FALSE}
+fit_epi_negbin_Base <- stan_glm.nb(count ~ Trt * scale(Base), data = epilepsy)
+```
+
+Alternatively, we may add log of the baseline. 
+
+```{r, eval=FALSE}
+fit_epi_negbin_BaseLog <- stan_glm.nb(count ~ Trt * scale(log(Base)), data = epilepsy)
+```
+
+Is there a theoretical reason to expect one to perform better?
+
+Let's run the same check as in the previous task --- does it look better? Which
+model seems to work better?
+
+```{r, eval=FALSE}
+pp_check(fit_epi_negbin_Base, plotfun = "dens_overlay_grouped", group = Base_grouped)
+pp_check(fit_epi_negbin_BaseLog, plotfun = "dens_overlay_grouped", group = Base_grouped)
+```
+
+The density plot may get hard to interpret, so we may focus on looking at mean and standard deviation within groups with
+thet `stat_grouped` check.
+
+```{r, eval = FALSE}
+pp_check(fit_epi_negbin_Base, plotfun = "stat_grouped", group = Base_grouped)
+pp_check(fit_epi_negbin_BaseLog, plotfun = "stat_grouped", group = Base_grouped)
+pp_check(fit_epi_negbin_Base, plotfun = "stat_grouped", stat = "sd", group = Base_grouped)
+pp_check(fit_epi_negbin_BaseLog, plotfun = "stat_grouped", stat = "sd", group = Base_grouped)
+
+```
+
+
+
+```{r}
+loo_epi_negbin_Base <- loo(fit_epi_negbin_Base)
+loo_epi_negbin_BaseLog <- loo(fit_epi_negbin_BaseLog)
+loo_compare(loo_epi_negbin_Base, loo_epi_negbin_BaseLog)
+```
+
+
+Inspect the summaries of those models - do they give different conclusions?
+
+```{r, eval=FALSE}
+summary(fit_epi_negbin_Base, probs = c(0.025,0.5,0.975))
+summary(fit_epi_negbin_BaseLog, probs = c(0.025,0.5,0.975))
+```
+
+
+## Task 3 
+
+Do we need to incorporate patient information? 
+
+Here's an example how to take more control and do a posterior predictive check for just a subset of the data,
+to focus on just some patients.
+
+```{r}
+yrep <- posterior_predict(fit_epi_negbin_BaseLog)
+selected <- epilepsy$patient %in% sample(unique(epilepsy$patient), size = 20) 
+yrep_sub <- yrep[, selected]
+ysub <- as.numeric(epilepsy$count[selected])
+group_sub <- epilepsy$patient[selected]
+ppc_stat_grouped(ysub, yrep_sub, group = group_sub)
+```
+
+
+We may add random effects by using the `stan_glmer` function (mimicking the lme4 syntax)
+
+```{r}
+fit_epi_negbin_re_patient <- stan_glmer.nb(
+count ~ Trt * scale(log(Base)) + (1 | patient),
+data = epilepsy
+)
+```
+
+Does this resolve some of our problems?
+
+Should we add other variables?
+
+How do these other models change our conclusions?
