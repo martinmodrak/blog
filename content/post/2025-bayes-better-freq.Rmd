@@ -402,7 +402,7 @@ coverages are within 92% - 96%.
 In fact we can see that the
 95% CI bounds for all methods are basically identical when we have 100 observations per group --- in the table below we focus on 
 the distance between median of the lower/upper bound of all methods. The only slight difference is to `brms` where we hit the limits
-of precision of the MCMC chains we ran, but except a few outliers (due to bad initialization, which could be resolved by even mild priors or just rerunning the chain) the bounds are within 0.01 of the other methods.
+of precision of the MCMC chains we ran, but except a few outliers (due to bad initialization, which could be resolved by even mild priors or just rerunning the chain) the bounds are within 0.1 of the other methods.
 
 ```{r}
 ci_match_summary <- function(coverage_df) {
