@@ -1,3 +1,15 @@
 #content {
   text-align:justify;
 }
+
+.highlight1, .highlight2 {
+  font-weight: bold;
+}
+
+.highlight1, .highlight1 *{
+  color:#E0001E;
+}
+
+.highlight2, .highlight2 * {
+  color:#008F85;
+}

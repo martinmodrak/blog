@@ -1,0 +1,225 @@
+---
+title: "Likelihood principle, data-driven selection and optional stopping"
+date: 2025-02-01
+tags: ["Bayes", "philosophy" ]
+draft: true
+---
+
+The simplest model
+
+$$
+Y \sim \text{Binomial}(10, \theta)
+$$
+
+And for our Bayesian friends, we add a uniform prior.
+
+$$
+\theta \sim \text{Uniform}(0,1)
+$$
+
+now all is good and well --- we can do reliable frequentist inference with the [Clopper-Pearson interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Clopper%E2%80%93Pearson_interval) or
+obtain  a Bayesian posterior via the Beta distribution $\pi(\theta | Y = y) = \text{Beta}(y + 1, 10 - y + 1)$.
+
+Now what if I told you that the person running the experiment would only report the result to you if they got all successes ($Y = 10$). This should change our inferences, right?
+For a frequentist, this is pretty easy --- the p-value is always 1 and all confidence intervals cover the whole $[0,1]$ range straight from their definitions.
+
+However, as the story is usually told, the a Bayesian runs into a problem here as they are bound to ignore the information that the result was selected. With a bit more generality, let $\mathtt{accept}(y)$ be probability of reporting the results for a given observed $y$. In our example we have
+
+$$
+\mathtt{accept}(y) = \begin{cases}
+  1 & y = 10 \\
+  0 & \text{otherwise}
+\end{cases}
+$$
+
+We define a random variable $a \sim \text{Bernoulli}(\mathtt{accept}(y))$. 
+
+It is a theorem of Bayesian statistic that conditioning on $a = 1$ does not change the posterior:
+
+$$
+\begin{equation}
+\pi(\theta | y, a = 1) = \pi(\theta | y)
+\end{equation}
+$$
+
+Proof is short enough for this ~~margin~~footnote^[
+**Proof:** We have a joint distribution $\pi(\theta, y, a)$ that factorizes as $\pi(\theta, y, a) = \pi(a|y)\pi(y | \theta)\pi(\theta)$. We can then look at the posterior conditional on accepting a dataset to see the claimed invariance:
+$$
+\begin{equation}
+\pi(\theta | y, a = 1) = \frac{\pi(a = 1 | y) \pi(y | \theta)\pi(\theta)}{\int_\Theta \mathrm{d}\tilde\theta \: \pi(a = 1 | y) \pi(y | \tilde\theta)\pi(\tilde\theta)} = 
+\frac{\pi(y | \theta)\pi(\theta)}{\int_\Theta \mathrm{d}\tilde\theta \: \pi(y | \tilde\theta)\pi(\tilde\theta)} = \pi(\theta | y)
+\end{equation}
+$$
+].
+
+This looks like a deep blow to the Bayesian --- how could it be sensible to ignore the selection process?
+
+I think the picture is best understood as various types of [truncation](https://en.wikipedia.org/wiki/Truncation_(statistics)), the main question being what is truncated.
+
+We note that in the frequentist analysis above, we truncate the observational model (likelihood), i.e. we can simulate the assumed data-generating process like this:
+
+```{r, eval=FALSE}
+theta <- 0.2 # Pick any fixed value you want
+repeat {
+  y <- rbinom(n = 1, size = 10, prob = theta)
+  if(y == 10) {
+    break
+  }
+}
+```
+
+However in the Bayesian analysis, we truncated the whole joint distribution $\pi(\theta,y)$, i.e. we can simulate the assumed data-generating process like this:
+
+```{r, eval=FALSE}
+repeat {
+  theta <- runif(n = 1, min = 0, max = 1)
+  y <- rbinom(n = 1, size = 10, prob = theta)
+  if(y == 10) {
+    break
+  }
+}
+```
+
+so whenever a given $\theta$ fails to yield $y = 10$, we _draw a new value of $\theta$_! Now the Bayesian result makes more sense --- among the cases when $y = 10$, high values of $\theta$ will be much more common than low values of $\theta$. 
+
+What has changed is the importance of the prior --- with no selective reporting, the Bayesian procedure with uniform prior has decent frequentist properties across the board. When selective reporting is present the Bayesian procedure will have good frequentist properties only if our prior for $\theta$ accurately represents the real-world distribution of possible experiments being run. (TODO maybe a small computation/sim study)
+
+If we in fact assume that a person will collect data on exactly the same population/setting/... repeatedly and only report when $y = 10$, i.e. that $\theta$ is fixed across retries, we totally can incorporate that assumption in a Bayesian analysis and use a truncated likelihood with our prior. In this case, it turns out that the truncated likelihood is constant and so the data contain no information and posterior equals the prior ($\pi(\theta |y ) = \pi(\theta)$), which closely corresponds to the frequentist result.
+
+
+## Stopping rules
+
+Mayo claims stopping rules impossible in Bayesian setting (page 42)
+
+Stop when $y \geq 3$ or $y \leq 7$ (i.e. when the 50% Credible interval does not include $\theta =50$),
+otherwise collect 10 more observations.
+
+```{r}
+single_sim <- function(theta) {
+  y1 <- rbinom(n = 1, size = 10, prob = theta)
+  if(y1 <= 3 || y1 >= 7) {
+    return(TRUE)
+  } else {
+    y2 <- rbinom(n = 1, size = 10, prob = theta)
+    return(y1 + y2 <= 8 || y1 + y2 >= 12)
+  }
+}
+
+single_sim_no_stop <- function(theta) {
+  y1 <- rbinom(n = 1, size = 20, prob = theta)
+  return(y1 <= 8 || y1 >= 12)
+}
+
+
+mean(replicate(10000, single_sim(0.5)))
+mean(replicate(10000, single_sim_no_stop(0.5)))
+```
+
+
+```{r}
+library(cmdstanr)
+library(SBC)
+library(ggplot2)
+mirai::daemons(parallelly::availableCores(), dispatcher = FALSE, force = FALSE)
+future::plan(future.mirai::mirai_cluster)
+theme_set(theme_minimal())
+```
+
+```{r}
+m_optstop <- cmdstan_model("optional_stopping_binomial.stan")
+backend_optstop <- SBC_backend_cmdstan_sample(m_optstop)
+```
+
+```{r}
+sim_optstop <- function() {
+  stop_low <- 3
+  stop_high <- 7
+  N_trials <- 10
+  theta <- runif(1, min = 0, max = 1)
+  y <- rbinom(2, size = N_trials, prob = theta)
+  if(y[1] <= stop_low || y[1] >= stop_high){
+    y <- y[1]
+  }
+  
+  list(
+    variables = list(theta = theta),
+    generated = list(N = length(y),N_trials = N_trials, y = y, stop_low = stop_low, stop_high = stop_high)
+  )
+}
+
+ds_optstop <- generate_datasets(SBC_generator_function(sim_optstop), n_sims = 1000)
+
+log_lik_optstop <- function(y, N_trials, theta) {
+  stop_low <- 3
+  stop_high <- 7
+  prob_stopped <- pbinom(stop_low, N_trials, theta) + pbinom(N_trials - stop_high, N_trials, 1 - theta)
+  log_lik_base <- sum(dbinom(y, N_trials, theta, log = TRUE))
+  if(length(y) == 1){
+    log_lik <- log_lik_base - log(prob_stopped)
+  } else {
+    log_lik <- log_lik_base - log1p(-prob_stopped)
+  }
+  return(log_lik)
+}
+
+dq_optstop <- derived_quantities(
+  log_lik = log_lik_optstop(y, N_trials, theta),
+  log_lik_bad = dbinom(sum(y), size = N*N_trials, prob = theta, log = TRUE), 
+  dratio = log_lik_optstop(y, N_trials, theta) - dbinom(sum(y), size = N*N_trials, prob = theta, log = TRUE), 
+  .globals = "log_lik_optstop")
+
+```
+
+
+```{r}
+res_optstop <- compute_SBC(ds_optstop, backend_optstop, keep_fits = FALSE, dquants = dq_optstop)
+plot_ecdf_diff(res_optstop)
+
+plot_ecdf_diff(res_optstop[res_optstop$backend_diagnostics$n_divergent==0])
+
+```
+
+```{r}
+bad_ind <- which(res_optstop$backend_diagnostics$n_divergent > 0)
+purrr::map(ds_optstop$generated, \(x) x$y)[bad_ind]
+purrr::map_int(ds_optstop$generated, \(x) x$N) |> table()
+```
+
+```{r}
+#bayesplot::mcmc_pairs(res_optstop$fits[[bad_ind[1]]])
+```
+
+
+```{r}
+#test_data <- list(N = 2,N_trials = 20, y = c(8, 12), stop_low = 0, stop_high = 20)
+#test_data <- list(N = 1,N_trials = 20, y = c(8), stop_low = 8, stop_high = 9)
+test_data <- ds_optstop$generated[[2]]
+m_optstop$sample(test_data)
+
+qbeta(c(0.05,0.95), sum(test_data$y) + 1, test_data$N * test_data$N_trials - sum(test_data$y) + 1)
+```
+
+
+```{r}
+SBC_backend_beta <- function() {
+  structure(list(), class = "SBC_backend_beta")
+}
+
+SBC_fit.SBC_backend_beta <- function(backend, generated, cores) {
+  shape1 <- sum(generated$y) + 1
+  shape2 <- generated$N * generated$N_trials - sum(generated$y) + 1
+  posterior::draws_matrix(theta = rbeta(1000, shape1, shape2))
+}
+
+SBC_backend_iid_draws.SBC_backend_beta <- function(backend) {
+  TRUE
+}
+
+beta_globals <- c("SBC_fit.SBC_backend_beta", "SBC_backend_iid_draws.SBC_backend_beta")
+```
+
+```{r}
+res_beta <- compute_SBC(ds_optstop, SBC_backend_beta(), keep_fits = FALSE, dquants = dq_optstop, globals = beta_globals, chunk_size = 100)
+plot_ecdf_diff(res_beta)
+```
+

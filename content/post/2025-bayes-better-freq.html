@@ -1,0 +1,369 @@
+---
+title: "Using Bayesian tools to be a better frequentist "
+date: 2025-07-09
+tags: ["Bayes", "frequentism", "brms" ]
+---
+
+
+
+<p>I am not a staunch advocate of Bayesian methods — I can totally see how for some
+questions a frequentist approach may provide more satisfactory answers.
+In this post, we’ll explore how for a simple scenario (negative binomial regression with small sample size),
+standard frequentist methods fail at being frequentist while standard Bayesian methods provide good frequentist guarantees.</p>
+<div id="a-bit-of-theory" class="section level2">
+<h2>A bit of theory</h2>
+<p>First, lets make sure we all agree what we are talking about.
+Those comfortable with Bayesian and frequentist calibration may safely skip to the next section.</p>
+<p>For simplicity, we will focus on uncertainty intervals for a continuous parameter.
+A frequentist will construct a <span class="highlight1"><em>confidence interval</em></span> (CI) which should satisfy the following requirement:</p>
+<blockquote>
+<p>For <span class="highlight1">any fixed</span> parameter value, <span class="math inline">\(x\%\)</span> CI contains the true value <span class="highlight2">at least</span> <span class="math inline">\(x\%\)</span> of the time.</p>
+</blockquote>
+<p>In other words, we are aiming to control <span class="highlight2"><em>worst case</em></span> behaviour.
+We also note that CIs do not require exact coverage, but put a lower bound on coverage — this is
+primarily because in many settings a CI with exact coverage may not exist
+(i.e. to obtain sufficient coverage in the worst case, one must settle for larger than nominal coverage elsewhere).
+CIs are closely related to frequentist tests as any hypothesis outside of <span class="math inline">\(1 - \alpha\)</span> CI can be rejected at <span class="math inline">\(\alpha\)</span> level.</p>
+<p>A Bayesian will typically compute a <span class="highlight1"><em>credible interval</em></span> (CrI), which has a slightly different property:</p>
+<blockquote>
+<p><span class="highlight1">Averaged</span> over the prior, <span class="math inline">\(x\%\)</span> CrI contains the true value <span class="highlight2">exactly</span> <span class="math inline">\(x\%\)</span> of the time.</p>
+</blockquote>
+<p>So instead of worst case we are looking at the average case. We explicitly accept that specific parameter values may lead to low coverage
+as long as other parameter values lead to higher coverage.
+On the other hand, we are often able to compute exact<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a> credible intervals achieveng precisely the
+desired coverage.</p>
+<p>To highlight the difference, we will use a simple “coin flipping” scenario:</p>
+<p><span class="math display">\[
+Y \sim \text{Binomial}(20, \theta)
+\]</span></p>
+<p>And assume a Bayesian would use a uniform prior:</p>
+<p><span class="math display">\[
+\theta \sim \text{Uniform}(0,1)
+\]</span></p>
+<p>In this setting, we can do reliable frequentist inference with the <a href="https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval#Clopper%E2%80%93Pearson_interval">Clopper-Pearson interval</a> or
+obtain a Bayesian posterior via the Beta distribution <span class="math inline">\(\pi(\theta | Y = y) = \text{Beta}(y + 1, 20 - y + 1)\)</span>.</p>
+<p>Let’s look on the coverage of the Clopper-Pearson interval as well as a credible interval, specifically the 95% highest
+posterior density interval<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a> for
+all possible values of <span class="math inline">\(\theta\)</span>:</p>
+<p><img src="/post/2025-bayes-better-freq_files/figure-html/binomial-coverage-1.png" width="672" /></p>
+<p>We see that the Clopper-Pearson interval is conservative: it always achieves at least 95% coverage (sometimes much larger),
+regardless of the true proportion (<span class="math inline">\(\theta\)</span>). OTOH, the Bayesian HPDI has higher coverage for some values and lower for others
+— in fact the area above the red horizontal line (nominal calibration) is exactly equal to the area under and thus we have
+exactly 95% coverage when averaged over uniform prior. The Clopper-Pearson intervals would naturally be a bit wider than the Bayesian HPDI.
+We also see that discrete data make the plot look pretty wild.</p>
+</div>
+<div id="the-curious-case-of-the-negative-binomial" class="section level2">
+<h2>The curious case of the negative binomial</h2>
+<p>To show a situation where standard frequentist intervals don’t perform so well, we are going to fit a negative binomial regression model, with 2 groups.
+Technically:</p>
+<p><span class="math display">\[
+y_i \sim NB(\mu_i, \phi) \\
+\log\mu_i = \alpha + \beta \times \text{group}_i
+\]</span></p>
+<p>where <span class="math inline">\(\text{group}_i\)</span> is a binary indicator of group membership.
+For the frequentist side, we will be using <code>MASS</code> package:</p>
+<pre class="r"><code>MASS::glm.nb(y ~ group, data = data)</code></pre>
+<p>as well as the <code>gamlss</code> package:</p>
+<pre class="r"><code>gamlss::gamlss(y ~ group, family = &quot;NBI&quot;)</code></pre>
+<p>and the <code>glmmTMB</code> package:</p>
+<pre class="r"><code>glmmTMB::glmmTMB(y ~ group, family = glmmTMB::nbinom2, data = data)</code></pre>
+<p>on the Bayesian side, we’ll use the <code>brms</code> package with flat priors:</p>
+<pre class="r"><code>brms::brm(y ~ group, data = data, family = &quot;negbinomial&quot;, 
+  prior = brms::prior(&quot;&quot;, class = &quot;Intercept&quot;))</code></pre>
+<p>(the results don’t change much if we keep the default prior).</p>
+<p>Note that frequentist coverage needs to hold for <span class="highlight1">any</span> true parameter
+value, so proving a frequentist method works is hard, but finding even a single set of parameters where the coverage does not hold
+invalidates the method (strictly speaking).</p>
+<p>We will focus on a small-sample scenario with 4 observations in each group.
+As a check, we will also include large-sample scenario with 100 observations in each group.</p>
+<p>To cover a range of somewhat realistic scenarios, we will use a single value of <span class="math inline">\(\alpha = \log(100)\)</span>,
+and iterate over 10 values of <span class="math inline">\(\beta\)</span> equally spaced between <span class="math inline">\(0\)</span> and <span class="math inline">\(2\)</span> and <span class="math inline">\(\phi \in \{0.5, 1, 2.5, 10\}\)</span>.</p>
+<p>Typically <span class="math inline">\(\beta\)</span> is the parameter of interest, so we will examine its coverage
+and we won’t care about the coverage for <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\phi\)</span> as that’s tangential (and packages rarely optimize for those parameters).</p>
+<p>Here is our simulation code (note that we make sure to always use exactly the same
+dataset with all packages):</p>
+<pre class="r"><code>sim_nb_coverage_single &lt;- function(N_per_group, mu, b, phi, sim_id, base_brm) {
+  group &lt;- c(rep(0, N_per_group), rep(1, N_per_group))
+  
+  y &lt;- rnbinom(2 * N_per_group, mu = exp(mu + b * group), size = phi)
+  data &lt;- data.frame(y, group)
+  
+  cf_glm.nb &lt;- suppressMessages(confint(MASS::glm.nb(y ~ group, data = data))[2, ])
+  
+  cf_gamlss &lt;- tryCatch({
+    fit_gamlss &lt;- gamlss::gamlss(y ~ group, family = &quot;NBI&quot;, data = data)
+    confint(fit_gamlss)[2, ]
+  }, error = function(e) {
+    return(c(NA, NA))
+  })
+  
+  
+  cf_glmmTMB &lt;- tryCatch({
+    m &lt;- glmmTMB::glmmTMB(y ~ group, family = glmmTMB::nbinom2, data = data)
+    confint(m,
+            method = &quot;profile&quot;,
+            parm = &quot;group&quot;,
+            estimate = FALSE)
+  }, error = function(e) {
+    return(c(NA, NA))
+  })
+  
+  
+  # Rarely we get problematic init which results in fitted phi -&gt; infty and bad BFMI
+  # refitting fixes that (more informative prior on phi also would)
+  for (i in 1:5) {
+    fit_brm &lt;- update(
+      base_brm,
+      newdata = data,
+      cores = 1,
+      chains = 2,
+      future = FALSE,
+      refresh = 0
+    )
+    
+    if (all(!is.na(rstan::get_bfmi(fit_brm$fit)))) {
+      break
+    }
+  }
+  
+  bfmi_problem &lt;- any(is.na(rstan::get_bfmi(fit_brm$fit)))
+  cf_brm &lt;- brms::fixef(fit_brm)[&quot;group&quot;, c(3, 4)]
+  
+  data.frame(
+    method = c(&quot;glm.nb&quot;, &quot;glmmTMB&quot;, &quot;gamlss&quot;, &quot;brms&quot;),
+    sim_id,
+    mu = mu,
+    b = b,
+    phi = phi,
+    N_per_group = N_per_group,
+    ci_low = unname(c(
+      cf_glm.nb[1], cf_glmmTMB[1], cf_gamlss[1], cf_brm[1]
+    )),
+    ci_high = unname(c(
+      cf_glm.nb[2], cf_glmmTMB[2], cf_gamlss[2], cf_brm[2]
+    )),
+    bfmi_problem = c(FALSE, FALSE, FALSE, bfmi_problem)
+  )
+}</code></pre>
+<p>Now we just run it (+cache results)</p>
+<pre class="r"><code>coverage_cache_file &lt;- file.path(cache_dir, &quot;nb_coverage.rds&quot;)
+if(!file.exists(coverage_cache_file)) {
+  
+  
+  # Construct base brms object to update
+  mu_0 &lt;- log(100)
+  group_eff &lt;- log(1.5)
+  true_phi &lt;- 2.5
+  group &lt;- c(rep(0, 4), rep(1, 4))
+  y &lt;- rnbinom(8, mu = exp(mu_0 + group_eff * group), size = true_phi)
+  prior &lt;- c(brms::prior(&quot;&quot;, class = &quot;Intercept&quot;))
+  base_brm &lt;- brms::brm(
+    y ~ group,
+    data = data.frame(y, group),
+    family = &quot;negbinomial&quot;,
+    prior = prior,
+    backend = &quot;cmdstanr&quot;
+  )
+  
+  
+  scenarios &lt;- tidyr::crossing(
+    N_per_group = c(4, 100),
+    mu = log(100),
+    b = seq(0, 2, length.out = 10),
+    phi = c(0.5, 1, 2.5, 10),
+    sim_id = 1:1000
+  )
+  
+  
+  nb_coverage_df &lt;- furrr::future_pmap_dfr(
+    scenarios,
+    \(...) sim_nb_coverage_single(..., base_brm = base_brm),
+    .options = furrr::furrr_options(seed = TRUE, chunk_size = 40)
+  )
+  
+  saveRDS(nb_coverage_df, file = coverage_cache_file)
+} else {
+  nb_coverage_df &lt;- readRDS(coverage_cache_file)
+}</code></pre>
+<p>And we plot the results for <span class="math inline">\(4\)</span> observations per group — showing the coverage + dark gray band is the the remaining
+uncertainty about the coverage (via the Clopper-Pearson interval):</p>
+<pre class="r"><code>coverage_plot &lt;- function(coverage_df) {
+  coverage_df |&gt;
+    filter(!is.na(ci_low), !is.na(ci_high)) |&gt;
+    mutate(
+      covered = b &gt;= ci_low &amp; b &lt;= ci_high,
+      `φ` = phi,
+      method = factor(method, levels = c(&quot;brms&quot;, &quot;glmmTMB&quot;, &quot;gamlss&quot;, &quot;glm.nb&quot;))
+    ) |&gt;
+    group_by(method, b, phi, `φ`) |&gt;
+    summarise(
+      coverage = mean(covered),
+      n_covered = sum(covered),
+      coverage_low = qbeta(0.025, n_covered, n() - n_covered + 1),
+      coverage_high = qbeta(0.975, n_covered + 1 , n() - n_covered),
+      .groups = &quot;drop&quot;
+    ) |&gt;
+    ggplot()  + aes(
+      x = b,
+      ymin = coverage_low,
+      y = coverage,
+      ymax = coverage_high
+    ) +
+    geom_hline(color = &quot;orangered&quot;, yintercept = 0.95) +
+    geom_ribbon(fill = &quot;#888&quot;, alpha = 0.3) +
+    geom_line() + facet_grid(`φ` ~ method, labeller = &quot;label_both&quot;) +
+    scale_y_continuous(&quot;Coverage&quot;, labels = scales::percent) +
+    scale_x_continuous(&quot;True β&quot;) + theme(strip.text.y = element_text(size = 10))
+}
+
+nb_coverage_df |&gt; filter(N_per_group == 4) |&gt; coverage_plot()</code></pre>
+<p><img src="/post/2025-bayes-better-freq_files/figure-html/plot-nb-sims-1.png" width="672" /></p>
+<p>We see that <code>glm.nb</code> performs pretty badly with coverage of the 95% CI fluctuating between ~75% and ~90%.
+The <code>gamlss</code> intervals are only slightly better and <code>glmmTMB</code> is yet better but still staying close to 90% coverage for all settings.
+In other words, all of the frequentist intervals are too narrow.
+On the other hand <code>brms</code> provides very close to nominal frequentist coverage for all tested parameter values,
+despite not technically claiming that guarantee.
+So what did happen to the frequentist packages?</p>
+</div>
+<div id="frequentist-computation-is-hard" class="section level2">
+<h2>Frequentist computation is HARD</h2>
+<p>There is a dirty secret behind most commonly used frequentist methods — except for a
+few special cases (e.g., standard linear regression, the aforementioned Clopper-Pearson interval) they are only
+only approximations that are justified by their behaviour in the large-data limit, but which
+have no strict guarantees in small datasets. Actual honest small-sample-guaranteed frequentist computation is hard for non-trivial models
+and often requires solutions specific to a single class of models.</p>
+<p>The two most-commonly found approximations are:</p>
+<ol style="list-style-type: decimal">
+<li><span class="highlight1">Normal</span> (also sometimes called “<span class="highlight1">Wald</span>”) - this relies on the normal approximation to the likelihood around the maximum-likelihood estimate, usually
+also accounting for additional uncertainty due to a scale parameter being estimated by using a Student’s t-distribution with appropriate number of degrees of freedom. In our example, <code>gamlss</code> derives CIs via the t distribution.</li>
+<li><span class="highlight2">Profile likelihood</span> CIs which are derived from the <span class="math inline">\(\chi^2\)</span> approximation in the <a href="https://en.wikipedia.org/wiki/Likelihood-ratio_test">likelihood-ratio test</a> (i.e. any value that wouldn’t be rejected by a likelihood ratio test at <span class="math inline">\(5\%\)</span> is included in the <span class="math inline">\(95\%\)</span> CI).
+In our example both <code>glm.nb</code> and <code>glmmTMB</code> compute profile confidence intervals (<code>glmmTMB</code> computes Wald intervals by default, but we have set <code>method = "profile"</code> to get profile intervals as <code>gamlss</code> already gave us Wald intervals).</li>
+</ol>
+<p>It is generally agreed that profile confidence intervals typically have better performance in small samples, i.e. they approach the asymptotic regime faster than normal/Wald intervals.</p>
+<p>The reason why <code>glm.nb</code> performs worse than <code>gamlss</code> and <code>glmmTMB</code> is that <code>glm.nb</code> is a wrapper around <code>glm</code>
+which for technical reasons<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a> treats <span class="math inline">\(\phi\)</span> as constant instead of optimizing it in the profile computation (as <code>glmmTMB</code> does), i.e.
+any uncertainty in <span class="math inline">\(\phi\)</span> is ignored when computing the CIs in <code>glm.nb</code>.</p>
+<p><code>gamlss</code> takes into account the uncertainty in <span class="math inline">\(\phi\)</span> but uses a Wald interval, which (as expected) performs worse than the profile likelihood used in <code>glmmTMB</code>.</p>
+<p>Since the packages included exhaust the common, general approaches to compute CIs, there is not
+much hope to get better coverage with another frequentist package, unless it implements
+some specialized method tailored specifically to negative binomial models.</p>
+<p>On the contrary, <code>brms</code> uses MCMC and allows for “exact” (Bayesian) computation
+regardless of sample size. It turns out that in this example, exact Bayesian answer is
+much closer to a correct frequentist answer than approximate frequentist approaches.</p>
+</div>
+<div id="large-data-limit" class="section level2">
+<h2>Large data limit</h2>
+<p>As a check we show that as we increase the sample size to 100 per group, we see all
+packages to converge on nominal coverage (as in large sample limit all of the approaches are equivalent).</p>
+<pre class="r"><code>nb_coverage_df |&gt; filter(N_per_group == 100) |&gt; coverage_plot()</code></pre>
+<p><img src="/post/2025-bayes-better-freq_files/figure-html/plot-large-data-1.png" width="672" /></p>
+<p>Note that the scale of the vertical axis has shrunk substantially and all the remaining
+coverages are within 92% - 96%.</p>
+<p>In fact we can see that the
+95% CI bounds for all methods are basically identical when we have 100 observations per group — in the table below we focus on
+the distance between median of the lower/upper bound of all methods. The only slight difference is to <code>brms</code> where we hit the limits
+of precision of the MCMC chains we ran, but except a few outliers (due to bad initialization, which could be resolved by even mild priors or just rerunning the chain) the bounds are within 0.01 of the other methods.</p>
+<pre class="r"><code>ci_match_summary &lt;- function(coverage_df) {
+  coverage_df |&gt;
+    group_by(sim_id, N_per_group, mu, b, phi) |&gt;
+    mutate(low = ci_low - median(ci_low),
+           high = ci_high - median(ci_high)) |&gt;
+    pivot_longer(all_of(c(&quot;low&quot;, &quot;high&quot;)), names_to = &quot;bound&quot;, values_to = &quot;value&quot;) |&gt;
+    group_by(method, bound) |&gt;
+    summarise(
+      `Within 0.01` = sum(abs(value) &lt; 0.01),
+      `Outside 0.01` = sum(abs(value) &gt;= 0.01),
+      `Outside 0.1` = sum(abs(value) &gt;= 0.1),
+      .groups = &quot;drop&quot;
+    )
+}
+nb_coverage_df |&gt; filter(N_per_group == 100) |&gt; ci_match_summary() |&gt; knitr::kable()</code></pre>
+<table>
+<thead>
+<tr>
+<th align="left">method</th>
+<th align="left">bound</th>
+<th align="right">Within 0.01</th>
+<th align="right">Outside 0.01</th>
+<th align="right">Outside 0.1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">brms</td>
+<td align="left">high</td>
+<td align="right">31411</td>
+<td align="right">8589</td>
+<td align="right">7</td>
+</tr>
+<tr>
+<td align="left">brms</td>
+<td align="left">low</td>
+<td align="right">31519</td>
+<td align="right">8481</td>
+<td align="right">7</td>
+</tr>
+<tr>
+<td align="left">gamlss</td>
+<td align="left">high</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td align="left">gamlss</td>
+<td align="left">low</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td align="left">glm.nb</td>
+<td align="left">high</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td align="left">glm.nb</td>
+<td align="left">low</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td align="left">glmmTMB</td>
+<td align="left">high</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td align="left">glmmTMB</td>
+<td align="left">low</td>
+<td align="right">40000</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>The aim of this demonstration is an existential proof: there are practically relevant cases where
+fitting a Bayesian model with flat (or very wide) priors gives you better frequentist performance than
+common frequentist approaches.</p>
+<p>I stumbled on this pretty randomly and I am not sure how common such situations are, but if anybody insists
+that frequentist tools are for some reason inherently superior to Bayesian, remember: most commonly used
+frequentist methods are approximations without strong small-sample guarantees. In such settings, even
+a staunch frequentist may be better served by Bayesian computation.</p>
+</div>
+<div class="footnotes footnotes-end-of-document">
+<hr />
+<ol>
+<li id="fn1"><p>or precise enough, with MCMC<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>In many cases the central CrI will work well, but here it has unnecessary problems as even when we have all
+success or all failures, the central posterior interval does not include 0 or 1, but the highest posterior density interval does.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+<li id="fn3"><p>Because it delegates most of its work to <code>glm</code> which requires an exponential family distribution. Neg. binomial with fixed <span class="math inline">\(\phi\)</span> is exponential family but with <span class="math inline">\(\phi\)</span> unknown it is not. <code>glm.nb</code> iteratively lets <code>glm</code> optimize all paramters except <span class="math inline">\(\phi\)</span> and then optimized <span class="math inline">\(\phi\)</span> and then refits via <code>glm</code> until convergence. But all methods on the fit (<code>confint</code>, <code>predict</code>, …) are delegated to <code>glm</code> which then keeps <span class="math inline">\(\phi\)</span> at the ML estimate.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+</ol>
+</div>
