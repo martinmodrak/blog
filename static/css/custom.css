@@ -13,3 +13,7 @@
 .highlight2, .highlight2 * {
   color:#008F85;
 }
+
+.nocaption .figcaption {
+  display:none;
+}

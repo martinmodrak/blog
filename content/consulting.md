@@ -1,7 +1,8 @@
 ---
 title: "Statistical Consulting"
 slug: consulting
-date: "2017-01-01"
+date: "2026-09-13"
+unlisted: true
 ---
 
 I love thinking about other people's statistical problems! So [get in touch](mailto:modrak.mar@gmail.com) if you need help with:
@@ -20,4 +21,4 @@ I am privileged to have a lot of freedom in what I do in research. So within the
 
 ## Commercial / NGO
 
-Commercial and NGO consulting is available on a case-by-case basis, though I have less experience in this area. Currently, I am helping the [Czech Scout Movement](https://www.skaut.cz/) use insights from data to better harness and grow the potential of its young adult members.
+Commercial and NGO consulting is available on a case-by-case basis, though I have less experience in this area. I have helped the [Czech Scout Movement](https://www.skaut.cz/) use insights from data to better harness and grow the potential of its young adult members.

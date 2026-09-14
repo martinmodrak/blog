@@ -1,0 +1,34 @@
+---
+title: "Grammo - Pojď zkoumat Bayese!"
+date: "2026-09-13"
+unlisted: true
+---
+
+Hledám uchazeče o výzkumnou pozici na mezinárodním projektu z Bayesovské statistiky „grammo – a grammar of models“. Chceme, aby se složité statistické modely daly snadno skládat z komponentů jako z kostek lega.
+
+* [Aplikovaná statistika.]{.highlight1} Pomoz nám vytvořit nástroj pro lepší modelování skutečných medicínských a psychologických dat. Umíme dělat statistiku, která má dopad na praxi.
+* [Mezinárodní propojení.]{.highlight1} Společný projekt s týmem Paulem Bürknera (TU Dortmund, autor balíčku brms), těsné zapojení do komunity kolem jazyka Stan.
+* [Raději matematiku nebo programování?]{.highlight1} Projekt má technickou více programovací část i více matematickou část. Přesné namíchání těchto ingrediencí lze vyladit podle tvých preferencí.
+
+[Nabízíme:]{.highlight1}
+
+* možnost spolupráce na diplomce i PhD studium
+* přátelský kolektiv
+* spolupráce se zkušenými statistiky
+* flexibilitu a vstřícnost k životu mimo práci
+
+
+Zájemci, prosím pište na: 
+
+[martin.modrak@lfmotol.cuni.cz](mailto:martin.modrak@lfmotol.cuni.cz)
+
+rád zodpovím případné dotazy.
+
+Těším se na vaše reakce,
+Martin Modrák, Ph.D.
+Ústav Bioinformatiky
+Univerzita Karlova - 2. lékařská fakulta
+
+[
+![Thomas Bayes wants YOU to join Bayesian stats. No cookbooks. Careful analysis that promotes understanding. Enlist now.](/grammo-call/I want you - Bayes.jpg)
+]{.nocaption}
