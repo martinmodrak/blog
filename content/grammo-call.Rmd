@@ -5,7 +5,8 @@ unlisted: true
 ---
 
 I am looking to fill a research post on an international project on Bayesian statistics „grammo – a grammar of models“. 
-We want to let users build complex models out of components as if building a lego set.
+We want to let users build complex models out of larger components as if building a lego set. 
+Then we find ways to automatically transform them into more efficient or otherwise better-behaved versions.
 
 * [Applied statistics.]{.highlight1} Help us build a tool for better modelling of real-world medical and psychological data. We know how to do statistical research that affects statistical practice.
 * [International connection.]{.highlight1} A project with the team of [Paul Bürkner](https://paulbuerkner.com/) (TU Dortmund, author of the [brms](https://paulbuerkner.com/brms/) package), close engagement with the Stan probabilistic programming language community.
@@ -17,6 +18,9 @@ We want to let users build complex models out of components as if building a leg
 * friendly workplace
 * work with experienced statisticians
 * flexibility and balance with your life outside of work
+
+
+I am not categorically opposed to AI, but I value human understanding and want to build reliable, legible and maintainable tools.
 
 
 If interested, please write to: 
