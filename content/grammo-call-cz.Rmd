@@ -7,7 +7,7 @@ unlisted: true
 Hledám uchazeče o výzkumnou pozici na mezinárodním projektu z Bayesovské statistiky „grammo – a grammar of models“. Chceme, aby se složité statistické modely daly snadno skládat z komponentů jako z kostek lega.
 
 * [Aplikovaná statistika.]{.highlight1} Pomoz nám vytvořit nástroj pro lepší modelování skutečných medicínských a psychologických dat. Umíme dělat statistiku, která má dopad na praxi.
-* [Mezinárodní propojení.]{.highlight1} Společný projekt s týmem Paulem Bürknera (TU Dortmund, autor balíčku brms), těsné zapojení do komunity kolem jazyka Stan.
+* [Mezinárodní propojení.]{.highlight1} Společný projekt s týmem [Paula Bürknera](https://paulbuerkner.com/) (TU Dortmund, autor balíčku [brms](https://paulbuerkner.com/brms/)), těsné zapojení do komunity kolem pravděpodobnostního jazyka Stan.
 * [Raději matematiku nebo programování?]{.highlight1} Projekt má technickou více programovací část i více matematickou část. Přesné namíchání těchto ingrediencí lze vyladit podle tvých preferencí.
 
 [Nabízíme:]{.highlight1}
